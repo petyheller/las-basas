@@ -8,22 +8,24 @@ const sortH = h => {
   return [...h].sort((a, b) => so[a.s] - so[b.s] || RV[b.r] - RV[a.r]);
 };
 
-function CardFace({ c, sel, ok, onClick, small }) {
+function CardFace({ c, sel, ok, onClick, small, tiny }) {
   const r = isRed(c.s);
-  const W = small ? 34 : 58, H = small ? 50 : 82;
+  const W = tiny ? 22 : small ? 34 : 58;
+  const H = tiny ? 32 : small ? 50 : 82;
   return (
     <div onClick={onClick} style={{
       width: W, height: H, background: '#fff',
-      border: `2px solid ${sel ? '#f59e0b' : '#d1d5db'}`, borderRadius: 6,
+      border: `${tiny ? 1 : 2}px solid ${sel ? '#f59e0b' : '#d1d5db'}`, borderRadius: tiny ? 3 : 6,
       display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-      padding: '2px 4px', cursor: ok || sel ? 'pointer' : 'default',
+      padding: tiny ? '1px 2px' : '2px 4px', cursor: ok || sel ? 'pointer' : 'default',
       boxShadow: sel ? '0 0 0 3px #fbbf24, 0 4px 8px rgba(0,0,0,.3)' : '0 2px 4px rgba(0,0,0,.25)',
       transform: sel ? 'translateY(-14px)' : ok ? 'translateY(-4px)' : 'none',
       transition: 'all .12s', color: r ? '#dc2626' : '#111827',
-      fontSize: small ? 9 : 11, userSelect: 'none', opacity: !ok && !sel ? .6 : 1, flexShrink: 0,
+      fontSize: tiny ? 8 : small ? 9 : 11, userSelect: 'none',
+      opacity: !ok && !sel ? .6 : 1, flexShrink: 0,
     }}>
       <div><b style={{ display: 'block', lineHeight: 1.1 }}>{c.r}</b><span>{c.s}</span></div>
-      <div style={{ textAlign: 'right' }}><span>{c.s}</span><b style={{ display: 'block', lineHeight: 1.1 }}>{c.r}</b></div>
+      {!tiny && <div style={{ textAlign: 'right' }}><span>{c.s}</span><b style={{ display: 'block', lineHeight: 1.1 }}>{c.r}</b></div>}
     </div>
   );
 }
@@ -40,7 +42,6 @@ function CardBack({ small }) {
 }
 
 function Scoreboard({ history, players, sc, scoring, onClose }) {
-  const n = players.length;
   const tdS = { padding: '5px 9px', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,.07)', fontSize: 12 };
   const thS = { padding: '6px 9px', textAlign: 'center', fontSize: 11, color: '#86efac', fontWeight: 'normal', borderBottom: '1px solid rgba(255,255,255,.18)', position: 'sticky', top: 0, background: '#0f3d22' };
   return (
@@ -69,7 +70,7 @@ function Scoreboard({ history, players, sc, scoring, onClose }) {
                 </tr>
                 <tr style={{ background: 'rgba(0,0,0,.25)' }}>
                   <th style={thS} /><th style={thS} /><th style={thS} />
-                  {players.map((_, i) => ['Ap', 'Bz', 'Pts'].map(l => <th key={i + l} style={{ ...thS, fontSize: 10, borderLeft: l === 'Ap' ? '1px solid rgba(255,255,255,.1)' : undefined }}>{l}</th>))}
+                  {players.map((_, i) => ['Ap', 'Bz', 'Pts'].map(l => <th key={i+l} style={{ ...thS, fontSize: 10, borderLeft: l === 'Ap' ? '1px solid rgba(255,255,255,.1)' : undefined }}>{l}</th>))}
                 </tr>
               </thead>
               <tbody>
@@ -104,18 +105,66 @@ function Scoreboard({ history, players, sc, scoring, onClose }) {
   );
 }
 
+function TrickLog({ trickLog, players, onClose }) {
+  const [page, setPage] = useState(trickLog.length - 1);
+  const trick = trickLog[page];
+  if (!trick) return null;
+  const winner = players[trick.winner] || {};
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.88)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60, padding: 16 }}>
+      <div style={{ background: '#166534', border: '2px solid #4ade80', borderRadius: 14, width: '100%', maxWidth: 480, padding: '20px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <span style={{ fontSize: 16, fontWeight: 500 }}>🃏 Historial de bazas</span>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,.3)', color: '#fff', borderRadius: 6, padding: '3px 12px', cursor: 'pointer', fontSize: 13 }}>✕</button>
+        </div>
+
+        {/* Pagination */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, justifyContent: 'center' }}>
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+            style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.2)', color: '#fff', borderRadius: 6, padding: '4px 12px', cursor: page === 0 ? 'not-allowed' : 'pointer', opacity: page === 0 ? .4 : 1 }}>←</button>
+          <span style={{ color: '#86efac', fontSize: 13 }}>Baza {page + 1} de {trickLog.length}</span>
+          <button onClick={() => setPage(p => Math.min(trickLog.length - 1, p + 1))} disabled={page === trickLog.length - 1}
+            style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.2)', color: '#fff', borderRadius: 6, padding: '4px 12px', cursor: page === trickLog.length - 1 ? 'not-allowed' : 'pointer', opacity: page === trickLog.length - 1 ? .4 : 1 }}>→</button>
+        </div>
+
+        {/* Cards played */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+          {trick.cards.map(({ p, c }) => {
+            const isWinner = p === trick.winner;
+            return (
+              <div key={p} style={{ display: 'flex', alignItems: 'center', gap: 12, background: isWinner ? 'rgba(74,222,128,.15)' : 'rgba(255,255,255,.04)', border: `1px solid ${isWinner ? 'rgba(74,222,128,.5)' : 'rgba(255,255,255,.1)'}`, borderRadius: 10, padding: '8px 14px' }}>
+                <CardFace c={c} ok={false} small />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: isWinner ? 'bold' : 'normal', color: isWinner ? '#4ade80' : '#e2e8f0' }}>
+                    {(players[p] || {}).name}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'rgba(255,255,255,.4)' }}>
+                    {c.r}{c.s}
+                    {p === trick.cards[0]?.p && <span style={{ marginLeft: 6, color: '#86efac' }}>abre</span>}
+                  </div>
+                </div>
+                {isWinner && <span style={{ fontSize: 18 }}>🏆</span>}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={{ textAlign: 'center', color: '#fbbf24', fontSize: 13 }}>
+          Se llevó la baza: <b>{winner.name}</b>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Chat({ messages, onSend, playerName }) {
   const [text, setText] = useState('');
   const bottomRef = useRef(null);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-  const send = () => {
-    if (!text.trim()) return;
-    onSend(text.trim());
-    setText('');
-  };
+  const send = () => { if (!text.trim()) return; onSend(text.trim()); setText(''); };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 5, minHeight: 200 }}>
         {messages.length === 0 && <div style={{ color: 'rgba(255,255,255,.3)', fontSize: 12, textAlign: 'center', marginTop: 16 }}>Sin mensajes aún</div>}
         {messages.map((m, i) => (
           <div key={i} style={{ fontSize: 12, lineHeight: 1.4 }}>
@@ -126,12 +175,9 @@ function Chat({ messages, onSend, playerName }) {
         <div ref={bottomRef} />
       </div>
       <div style={{ display: 'flex', gap: 6, padding: '6px 8px', borderTop: '1px solid rgba(255,255,255,.1)' }}>
-        <input
-          value={text} onChange={e => setText(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && send()}
+        <input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()}
           placeholder="Mensaje..." maxLength={120}
-          style={{ flex: 1, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 6, padding: '6px 10px', color: '#fff', fontSize: 12, outline: 'none' }}
-        />
+          style={{ flex: 1, background: 'rgba(255,255,255,.08)', border: '1px solid rgba(255,255,255,.2)', borderRadius: 6, padding: '6px 10px', color: '#fff', fontSize: 12, outline: 'none' }} />
         <button onClick={send} style={{ background: '#16a34a', border: 'none', borderRadius: 6, padding: '6px 12px', color: '#fff', cursor: 'pointer', fontSize: 12 }}>↑</button>
       </div>
     </div>
@@ -140,6 +186,7 @@ function Chat({ messages, onSend, playerName }) {
 
 export default function App() {
   const socketRef = useRef(null);
+  const reconnectRef = useRef(null); // { code, name } if we need to reconnect
   const [screen, setScreen] = useState('home');
   const [name, setName] = useState(() => localStorage.getItem('basas_name') || '');
   const [joinCode, setJoinCode] = useState('');
@@ -149,39 +196,39 @@ export default function App() {
   const [sel, setSel] = useState(null);
   const [showBoard, setShowBoard] = useState(false);
   const [showChat, setShowChat] = useState(false);
+  const [showTrickLog, setShowTrickLog] = useState(false);
   const [error, setError] = useState('');
   const [unread, setUnread] = useState(0);
   const prevChatLen = useRef(0);
+  const showChatRef = useRef(false);
+  showChatRef.current = showChat;
 
-  // Auto-reconnect on load
   useEffect(() => {
+    // Check for saved session on load
     const savedCode = localStorage.getItem('basas_room');
     const savedName = localStorage.getItem('basas_name');
     if (savedCode && savedName) {
-      setJoinCode(savedCode);
+      reconnectRef.current = { code: savedCode, name: savedName };
       setScreen('reconnecting');
     }
-  }, []);
 
-  useEffect(() => {
-    const socket = io({ reconnectionAttempts: 10, reconnectionDelay: 1500 });
+    const socket = io({ reconnectionAttempts: 15, reconnectionDelay: 1500 });
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      // Auto-reconnect if we have saved session
-      const savedCode = localStorage.getItem('basas_room');
-      const savedName = localStorage.getItem('basas_name');
-      if (savedCode && savedName && screen === 'reconnecting') {
-        socket.emit('reconnect_room', { code: savedCode, name: savedName });
+      // Use ref so we always have fresh value, not stale closure
+      if (reconnectRef.current) {
+        socket.emit('reconnect_room', reconnectRef.current);
       }
     });
 
     socket.on('game_update', (data) => {
       setG(data);
       setError('');
-      // Track unread chat
+      reconnectRef.current = null; // reconnect succeeded
+
       const chatLen = (data.chat || []).length;
-      if (chatLen > prevChatLen.current && !showChat) {
+      if (chatLen > prevChatLen.current && !showChatRef.current) {
         setUnread(u => u + (chatLen - prevChatLen.current));
       }
       prevChatLen.current = chatLen;
@@ -192,7 +239,9 @@ export default function App() {
 
     socket.on('error', ({ message }) => {
       setError(message);
-      if (screen === 'reconnecting') {
+      // If reconnect failed, clear saved session and go home
+      if (reconnectRef.current) {
+        reconnectRef.current = null;
         localStorage.removeItem('basas_room');
         setScreen('home');
       }
@@ -202,15 +251,13 @@ export default function App() {
   }, []);
 
   const emit = (ev, data) => socketRef.current?.emit(ev, data);
-
-  const saveName = (n) => { setName(n); localStorage.setItem('basas_name', n); };
+  const saveName = n => { setName(n); localStorage.setItem('basas_name', n); };
 
   const createRoom = () => {
     if (!name.trim()) { setError('Ingresá tu nombre'); return; }
     saveName(name.trim());
     emit('create_room', { name: name.trim(), maxPlayers: setupN, scoring: setupScoring });
   };
-
   const joinRoom = () => {
     if (!name.trim()) { setError('Ingresá tu nombre'); return; }
     if (!joinCode.trim()) { setError('Ingresá el código de sala'); return; }
@@ -218,12 +265,11 @@ export default function App() {
     emit('join_room', { code: joinCode.trim().toUpperCase(), name: name.trim() });
   };
 
-  // Save room code when we get it
   useEffect(() => {
     if (g?.roomCode) localStorage.setItem('basas_room', g.roomCode);
   }, [g?.roomCode]);
 
-  const humanBid = (bid) => {
+  const humanBid = bid => {
     if (!g || g.bp !== g.yourIndex) return;
     const filled = (g.bids || []).filter(b => b != null).length;
     const isLast = filled === (g.n || 0) - 1;
@@ -235,7 +281,7 @@ export default function App() {
     emit('place_bid', { roomCode: g.roomCode, bid });
   };
 
-  const humanPlay = (card) => {
+  const humanPlay = card => {
     if (!g || g.cp !== g.yourIndex || (g.trick || []).length >= g.n) return;
     if (card !== sel) { setSel(card); return; }
     setSel(null);
@@ -264,16 +310,15 @@ export default function App() {
     </button>
   );
 
-  // ── RECONNECTING ──
   if (screen === 'reconnecting') return (
     <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
       <div style={{ fontSize: 44 }}>🂡</div>
-      <p style={{ color: '#86efac', fontSize: 15 }}>Reconectando a la partida...</p>
-      <button onClick={() => { localStorage.removeItem('basas_room'); setScreen('home'); }} style={{ ...btnS, marginTop: 16, fontSize: 13 }}>Cancelar</button>
+      <p style={{ color: '#86efac', fontSize: 15, marginBottom: 8 }}>Reconectando a la partida...</p>
+      <p style={{ color: 'rgba(255,255,255,.4)', fontSize: 12, marginBottom: 20 }}>Sala: {localStorage.getItem('basas_room')}</p>
+      <button onClick={() => { reconnectRef.current = null; localStorage.removeItem('basas_room'); setScreen('home'); }} style={{ ...btnS, fontSize: 13 }}>Cancelar y volver al inicio</button>
     </div>
   );
 
-  // ── HOME ──
   if (screen === 'home') return (
     <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
       <div style={{ fontSize: 52, lineHeight: 1 }}>🂡</div>
@@ -291,7 +336,6 @@ export default function App() {
     </div>
   );
 
-  // ── CREATE ──
   if (screen === 'create') return (
     <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
       <h2 style={{ fontSize: 24, fontWeight: 500, marginBottom: 20 }}>Crear sala</h2>
@@ -314,7 +358,6 @@ export default function App() {
     </div>
   );
 
-  // ── JOIN ──
   if (screen === 'join') return (
     <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
       <h2 style={{ fontSize: 24, fontWeight: 500, marginBottom: 20 }}>Unirse a sala</h2>
@@ -333,7 +376,6 @@ export default function App() {
     </div>
   );
 
-  // ── LOBBY ──
   if (screen === 'lobby' && g) return (
     <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
       <div style={{ fontSize: 44, lineHeight: 1 }}>🂡</div>
@@ -368,7 +410,6 @@ export default function App() {
     </div>
   );
 
-  // ── GAME ──
   if (screen === 'game' && g) {
     const ok = getOk();
     const cpp = g.rs?.[g.ri] || 0;
@@ -376,6 +417,7 @@ export default function App() {
     const players = g.players || [];
     const myName = players[g.yourIndex]?.name || '';
     const chatMsgs = g.chat || [];
+    const trickLog = g.trickLog || [];
 
     return (
       <div style={{ ...gs, position: 'relative' }}>
@@ -404,10 +446,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* Main layout: game + chat sidebar */}
+        {/* Main layout */}
         <div style={{ width: '100%', maxWidth: 860, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-          {/* Game area */}
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8 }}>
+
             {/* Score bar */}
             <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
               {players.map((p, i) => (
@@ -490,14 +532,14 @@ export default function App() {
             )}
           </div>
 
-          {/* Chat sidebar (desktop) */}
+          {/* Chat sidebar */}
           {showChat && (
             <div style={{ width: 220, minHeight: 400, background: 'rgba(0,0,0,.25)', border: '1px solid rgba(255,255,255,.12)', borderRadius: 12, display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,.1)' }}>
                 <span style={{ fontSize: 13, fontWeight: 500 }}>💬 Chat</span>
                 <button onClick={() => setShowChat(false)} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,.5)', cursor: 'pointer', fontSize: 14 }}>✕</button>
               </div>
-              <div style={{ flex: 1, minHeight: 300 }}>
+              <div style={{ flex: 1 }}>
                 <Chat messages={chatMsgs} onSend={text => emit('chat_message', { roomCode: g.roomCode, text })} playerName={myName} />
               </div>
             </div>
@@ -506,34 +548,40 @@ export default function App() {
 
         {/* Round end modal */}
         {g.phase === 'rend' && (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
-            <div style={{ background: '#166534', border: '2px solid #4ade80', borderRadius: 16, padding: '28px 24px', minWidth: 320, textAlign: 'center', maxWidth: 460, width: '100%', boxShadow: '0 8px 40px rgba(0,0,0,.5)' }}>
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.82)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10, overflowY: 'auto', padding: 16 }}>
+            <div style={{ background: '#166534', border: '2px solid #4ade80', borderRadius: 16, padding: '24px 20px', minWidth: 320, textAlign: 'center', maxWidth: 460, width: '100%' }}>
               <div style={{ fontSize: 13, color: '#86efac', marginBottom: 4 }}>Ronda {(g.ri || 0) + 1} terminada</div>
-              <h3 style={{ margin: '0 0 18px', fontSize: 22, fontWeight: 600 }}>Resultados</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20 }}>
+              <h3 style={{ margin: '0 0 16px', fontSize: 22, fontWeight: 600 }}>Resultados</h3>
+
+              {/* Per-player results */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
                 {players.map((p, i) => {
                   const hit = (g.bids || [])[i] === (g.taken || [])[i];
                   const pts = (g.rdSc || [])[i] || 0;
                   return (
-                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, background: i === g.yourIndex ? 'rgba(255,255,255,.1)' : 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 14px', border: hit ? '1px solid rgba(74,222,128,.4)' : '1px solid rgba(248,113,113,.25)' }}>
-                      <div style={{ fontSize: 20 }}>{hit ? '✅' : '❌'}</div>
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, background: i === g.yourIndex ? 'rgba(255,255,255,.1)' : 'rgba(255,255,255,.04)', border: `1px solid ${hit ? 'rgba(74,222,128,.4)' : 'rgba(248,113,113,.25)'}`, borderRadius: 10, padding: '9px 14px' }}>
+                      <div style={{ fontSize: 18 }}>{hit ? '✅' : '❌'}</div>
                       <div style={{ flex: 1, textAlign: 'left' }}>
-                        <div style={{ fontSize: 14, fontWeight: 500 }}>{p.name}</div>
-                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)' }}>Apostó {(g.bids || [])[i]} — Hizo {(g.taken || [])[i]}</div>
+                        <div style={{ fontSize: 13, fontWeight: 500 }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,.45)' }}>Apostó {(g.bids || [])[i]} — Hizo {(g.taken || [])[i]}</div>
                       </div>
                       <div style={{ textAlign: 'right' }}>
                         <div style={{ fontSize: 20, fontWeight: 'bold', color: pts >= 0 ? '#4ade80' : '#f87171' }}>{pts >= 0 ? '+' : ''}{pts}</div>
-                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,.5)' }}>Total: {(g.sc || [])[i] || 0}</div>
+                        <div style={{ fontSize: 11, color: 'rgba(255,255,255,.45)' }}>Total: {(g.sc || [])[i] || 0}</div>
                       </div>
                     </div>
                   );
                 })}
               </div>
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-                <button onClick={() => setShowBoard(true)} style={{ background: 'rgba(255,255,255,.12)', color: '#fff', border: '1px solid rgba(255,255,255,.3)', borderRadius: 8, padding: '10px 16px', fontSize: 13, cursor: 'pointer' }}>📋 Pizarra</button>
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button onClick={() => setShowBoard(true)} style={{ background: 'rgba(255,255,255,.1)', color: '#fff', border: '1px solid rgba(255,255,255,.25)', borderRadius: 8, padding: '9px 14px', fontSize: 13, cursor: 'pointer' }}>📋 Pizarra</button>
+                {trickLog.length > 0 && (
+                  <button onClick={() => setShowTrickLog(true)} style={{ background: 'rgba(255,255,255,.1)', color: '#fff', border: '1px solid rgba(255,255,255,.25)', borderRadius: 8, padding: '9px 14px', fontSize: 13, cursor: 'pointer' }}>🃏 Ver bazas</button>
+                )}
                 {g.isHost
-                  ? <button onClick={() => emit('next_round', { roomCode: g.roomCode })} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, padding: '10px 22px', fontSize: 14, cursor: 'pointer', fontWeight: 'bold' }}>
-                      {(g.ri || 0) + 1 >= (g.rs?.length || 1) - 1 ? 'Ver resultado final →' : 'Siguiente ronda →'}
+                  ? <button onClick={() => emit('next_round', { roomCode: g.roomCode })} style={{ background: '#16a34a', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 20px', fontSize: 14, cursor: 'pointer', fontWeight: 'bold' }}>
+                      {(g.ri || 0) + 1 >= (g.rs?.length || 1) - 1 ? 'Resultado final →' : 'Siguiente ronda →'}
                     </button>
                   : <span style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, alignSelf: 'center' }}>Esperando al host...</span>
                 }
@@ -572,6 +620,7 @@ export default function App() {
         )}
 
         {showBoard && <Scoreboard history={g.history || []} players={players} sc={g.sc || []} scoring={g.scoring} onClose={() => setShowBoard(false)} />}
+        {showTrickLog && trickLog.length > 0 && <TrickLog trickLog={trickLog} players={players} onClose={() => setShowTrickLog(false)} />}
       </div>
     );
   }
