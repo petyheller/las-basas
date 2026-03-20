@@ -7,8 +7,15 @@ const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
 
-app.use(express.static(path.join(__dirname, 'client/dist')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'client/dist/index.html')));
+const distPath = path.join(__dirname, 'client', 'dist');
+console.log('Static path:', distPath);
+app.use(express.static(distPath));
+app.get('*', (req, res) => {
+  const idx = path.join(distPath, 'index.html');
+  res.sendFile(idx, err => {
+    if (err) res.status(200).send('<h1>Las Basas - Server running OK</h1>');
+  });
+});
 
 // ─── Game Logic ───────────────────────────────────────────────────────────────
 const SUITS = ['♠','♥','♦','♣'];
@@ -133,7 +140,7 @@ function broadcastRoom(roomCode) {
     if (!socket) return;
 
     const payload = {
-      phase: room.phase,
+      phase: g ? g.phase : room.phase,
       roomCode,
       players: room.players.map(p => ({ name: p.name, isBot: p.isBot, connected: !!p.socketId })),
       scoring: room.scoring,
@@ -442,4 +449,4 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3001;
-httpServer.listen(PORT, () => console.log(`🂡 Las Basas server running on port ${PORT}`));
+httpServer.listen(PORT, '0.0.0.0', () => console.log(`🂡 Las Basas server running on port ${PORT}`));
