@@ -136,7 +136,7 @@ function broadcastRoom(roomCode) {
       payload.ri = g.ri; payload.rs = g.rs; payload.sc = g.sc;
       payload.history = g.history; payload.trump = g.trump; payload.tCard = g.tCard;
       payload.bids = g.bids; payload.bp = g.bp; payload.taken = g.taken;
-      payload.trick = g.trick; payload.lead = g.lead; payload.rdSc = g.rdSc; payload.trickLog = g.trickLog || [];
+      payload.trick = g.trick; payload.lead = g.lead; payload.rdSc = g.rdSc; payload.trickLog = g.trickLog || []; payload.lastTrick = g.lastTrick || null;
       payload.cp = g.cp; payload.lp = g.lp; payload.dealer = g.dealer;
       payload.n = room.players.length;
       payload.myHand = g.hands[idx] || [];
@@ -226,7 +226,9 @@ function resolveTrick(roomCode) {
   const w = trickWin(g.trick, g.lead, g.trump);
   g.taken[w]++;
   if (!g.trickLog) g.trickLog = [];
-  g.trickLog.push({ cards: g.trick.map(t => ({ p: t.p, c: t.c })), winner: w, lead: g.lead });
+  const completedTrick = { cards: g.trick.map(t => ({ p: t.p, c: t.c })), winner: w, lead: g.lead };
+  g.trickLog.push(completedTrick);
+  g.lastTrick = completedTrick;
   g.trick = []; g.lead = null;
   if (g.hands.every(h => h.length === 0)) {
     const rdSc = g.taken.map((got, i) => calcScore(room.scoring, g.bids[i], got));
@@ -250,7 +252,7 @@ function handleNextRound(roomCode) {
   if (ri >= g.rs.length) { g.phase = 'gend'; broadcastRoom(roomCode); return; }
   const dealer = (g.dealer + 1) % room.players.length;
   const deal = dealRound(g.rs, ri, dealer, room.players.length);
-  Object.assign(g, deal, { ri, dealer, phase: 'bid', msg: '' });
+  Object.assign(g, deal, { ri, dealer, phase: 'bid', msg: '', lastTrick: null });
   broadcastRoom(roomCode);
   scheduleBots(roomCode);
 }
@@ -367,7 +369,13 @@ io.on('connection', (socket) => {
     const roomCode = socket.roomCode; if (!roomCode) return;
     const room = rooms.get(roomCode); if (!room) return;
     const player = room.players.find(p => p.socketId === socket.id);
-    if (player) { player.socketId = null; broadcastRoom(roomCode); }
+    if (player) { player.socketId = null; }
+    // Transfer host if the host disconnected
+    if (room.host === socket.id) {
+      const newHost = room.players.find(p => p.socketId && !p.isBot);
+      if (newHost) room.host = newHost.socketId;
+    }
+    broadcastRoom(roomCode);
     if (room.players.every(p => !p.socketId || p.isBot)) {
       if (botTimers.has(roomCode)) clearTimeout(botTimers.get(roomCode));
       // Give 10 minutes for reconnection before cleaning up
