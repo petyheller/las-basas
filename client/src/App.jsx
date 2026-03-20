@@ -496,7 +496,7 @@ export default function App() {
             </div>
 
             {/* Last trick */}
-            {lastTrick && (g.trick || []).length === 0 && g.phase === 'play' && (
+            {lastTrick && g.phase === 'play' && (
               <div style={{ background: 'rgba(0,0,0,.15)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 10, padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 11, color: 'rgba(255,255,255,.4)', flexShrink: 0 }}>Última baza →</span>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', flex: 1 }}>
