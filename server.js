@@ -8,7 +8,6 @@ const httpServer = createServer(app);
 const io = new Server(httpServer, { cors: { origin: '*' } });
 
 const distPath = path.join(__dirname, 'client', 'dist');
-console.log('Static path:', distPath);
 app.use(express.static(distPath));
 app.get('*', (req, res) => {
   const idx = path.join(distPath, 'index.html');
@@ -17,7 +16,6 @@ app.get('*', (req, res) => {
   });
 });
 
-// ─── Game Logic ───────────────────────────────────────────────────────────────
 const SUITS = ['♠','♥','♦','♣'];
 const RANKS = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
 const RV = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14};
@@ -30,19 +28,15 @@ function shuffle(arr) {
   }
   return a;
 }
-
 function mkDeck() {
   return shuffle(SUITS.flatMap(s => RANKS.map(r => ({ s, r, id: s + r + Math.random().toString(36).slice(2) }))));
 }
-
 function mkRounds(n) {
-  const max = 0 | (52 / n);
-  const rs = [];
+  const max = 0 | (52 / n), rs = [];
   for (let i = 1; i < max; i++) rs.push(i);
   for (let i = 0; i < n; i++) rs.push(max);
   return rs;
 }
-
 function beats(a, b, lead, trump) {
   if (!a || !b) return false;
   const at = trump && a.s === trump, bt = trump && b.s === trump;
@@ -51,21 +45,18 @@ function beats(a, b, lead, trump) {
   if (al && !bl) return true; if (!al && bl) return false;
   return RV[a.r] > RV[b.r];
 }
-
 function trickWin(trick, lead, trump) {
   let w = 0;
   for (let i = 1; i < trick.length; i++)
     if (beats(trick[i].c, trick[w].c, lead, trump)) w = i;
   return trick[w].p;
 }
-
 function calcScore(scoring, bid, got) {
   const d = Math.abs(got - bid);
   if (d !== 0) return -10 * d;
   if (scoring === 'fer') return bid === 0 ? 5 : 10 * bid;
   return 10 + bid * bid;
 }
-
 function aiBid(hand, trump, takenSoFar, total, isLast) {
   let e = hand.reduce((s, c) => {
     if (c.r === 'A') return s + .85;
@@ -83,30 +74,25 @@ function aiBid(hand, trump, takenSoFar, total, isLast) {
   }
   return b;
 }
-
 function aiPlay(hand, trick, lead, trump, bid, won) {
   if (!hand.length) return null;
   const want = won < bid;
   const suited = lead ? hand.filter(c => c.s === lead) : [];
   const ok = suited.length ? suited : hand;
   if (!trick.length) {
-    return want
-      ? ok.reduce((h, c) => beats(c, h, c.s, trump) ? c : h)
-      : ok.reduce((l, c) => beats(l, c, l.s, trump) ? c : l);
+    return want ? ok.reduce((h, c) => beats(c, h, c.s, trump) ? c : h)
+                : ok.reduce((l, c) => beats(l, c, l.s, trump) ? c : l);
   }
   const cur = trick.reduce((b, t) => beats(t.c, b.c, lead, trump) ? t : b);
   if (want) {
     const win = ok.filter(c => beats(c, cur.c, lead, trump));
-    return win.length
-      ? win.reduce((l, c) => beats(l, c, lead, trump) ? c : l)
-      : ok.reduce((l, c) => beats(l, c, lead, trump) ? c : l);
+    return win.length ? win.reduce((l, c) => beats(l, c, lead, trump) ? c : l)
+                     : ok.reduce((l, c) => beats(l, c, lead, trump) ? c : l);
   }
   const lose = ok.filter(c => !beats(c, cur.c, lead, trump));
-  return lose.length
-    ? lose.reduce((h, c) => beats(c, h, lead, trump) ? c : h)
-    : ok.reduce((l, c) => beats(l, c, lead, trump) ? c : l);
+  return lose.length ? lose.reduce((h, c) => beats(c, h, lead, trump) ? c : h)
+                     : ok.reduce((l, c) => beats(l, c, lead, trump) ? c : l);
 }
-
 function dealRound(rs, ri, dealer, n) {
   const cpp = rs[ri], deck = mkDeck();
   const hands = Array.from({ length: n }, (_, i) => deck.slice(i * cpp, (i + 1) * cpp));
@@ -117,7 +103,6 @@ function dealRound(rs, ri, dealer, n) {
   return { hands, trump, tCard, bids: Array(n).fill(null), bp: fb, taken: Array(n).fill(0), trick: [], lp: fb, cp: fb, lead: null, rdSc: [] };
 }
 
-// ─── Room Management ──────────────────────────────────────────────────────────
 const rooms = new Map();
 const botTimers = new Map();
 
@@ -133,12 +118,10 @@ function broadcastRoom(roomCode) {
   const room = rooms.get(roomCode);
   if (!room) return;
   const g = room.gameState;
-
   room.players.forEach((player, idx) => {
     if (!player.socketId) return;
     const socket = io.sockets.sockets.get(player.socketId);
     if (!socket) return;
-
     const payload = {
       phase: g ? g.phase : room.phase,
       roomCode,
@@ -147,57 +130,38 @@ function broadcastRoom(roomCode) {
       maxPlayers: room.maxPlayers,
       yourIndex: idx,
       isHost: player.socketId === room.host,
+      chat: room.chat || [],
     };
-
     if (g) {
-      payload.ri = g.ri;
-      payload.rs = g.rs;
-      payload.sc = g.sc;
-      payload.history = g.history;
-      payload.trump = g.trump;
-      payload.tCard = g.tCard;
-      payload.bids = g.bids;
-      payload.bp = g.bp;
-      payload.taken = g.taken;
-      payload.trick = g.trick;
-      payload.lead = g.lead;
-      payload.rdSc = g.rdSc;
-      payload.cp = g.cp;
-      payload.lp = g.lp;
-      payload.dealer = g.dealer;
+      payload.ri = g.ri; payload.rs = g.rs; payload.sc = g.sc;
+      payload.history = g.history; payload.trump = g.trump; payload.tCard = g.tCard;
+      payload.bids = g.bids; payload.bp = g.bp; payload.taken = g.taken;
+      payload.trick = g.trick; payload.lead = g.lead; payload.rdSc = g.rdSc;
+      payload.cp = g.cp; payload.lp = g.lp; payload.dealer = g.dealer;
       payload.n = room.players.length;
       payload.myHand = g.hands[idx] || [];
       payload.handCounts = g.hands.map(h => h.length);
       payload.msg = g.msg || '';
     }
-
     socket.emit('game_update', payload);
   });
 }
 
 function scheduleBots(roomCode) {
-  // Cancel any pending bot timer for this room
-  if (botTimers.has(roomCode)) {
-    clearTimeout(botTimers.get(roomCode));
-    botTimers.delete(roomCode);
-  }
-
+  if (botTimers.has(roomCode)) { clearTimeout(botTimers.get(roomCode)); botTimers.delete(roomCode); }
   const room = rooms.get(roomCode);
   if (!room || !room.gameState) return;
   const g = room.gameState;
-
   if (g.phase === 'bid' && g.bp >= 0) {
     const player = room.players[g.bp];
     if (player && player.isBot) {
       const t = setTimeout(() => {
-        const r = rooms.get(roomCode);
-        if (!r || !r.gameState) return;
+        const r = rooms.get(roomCode); if (!r || !r.gameState) return;
         const gs = r.gameState;
         const takenSoFar = (gs.bids || []).reduce((s, b) => b != null ? s + b : s, 0);
         const filled = (gs.bids || []).filter(b => b != null).length;
         const isLast = filled === r.players.length - 1;
-        const bid = aiBid(gs.hands[gs.bp], gs.trump, takenSoFar, gs.rs[gs.ri], isLast);
-        handleBid(roomCode, gs.bp, bid);
+        handleBid(roomCode, gs.bp, aiBid(gs.hands[gs.bp], gs.trump, takenSoFar, gs.rs[gs.ri], isLast));
       }, 600 + Math.random() * 400);
       botTimers.set(roomCode, t);
     }
@@ -205,8 +169,7 @@ function scheduleBots(roomCode) {
     const player = room.players[g.cp];
     if (player && player.isBot) {
       const t = setTimeout(() => {
-        const r = rooms.get(roomCode);
-        if (!r || !r.gameState) return;
+        const r = rooms.get(roomCode); if (!r || !r.gameState) return;
         const gs = r.gameState;
         const card = aiPlay(gs.hands[gs.cp], gs.trick, gs.lead, gs.trump, gs.bids[gs.cp], gs.taken[gs.cp]);
         if (card) handlePlay(roomCode, gs.cp, card.id);
@@ -217,233 +180,202 @@ function scheduleBots(roomCode) {
 }
 
 function handleBid(roomCode, playerIdx, bid) {
-  const room = rooms.get(roomCode);
-  if (!room || !room.gameState) return;
+  const room = rooms.get(roomCode); if (!room || !room.gameState) return;
   const g = room.gameState;
   if (g.phase !== 'bid' || g.bp !== playerIdx) return;
-
-  // Validate forbidden bid for last bidder
   const filled = g.bids.filter(b => b != null).length;
   const isLast = filled === room.players.length - 1;
   if (isLast) {
     const takenSoFar = g.bids.reduce((s, b) => b != null ? s + b : s, 0);
-    if (bid === g.rs[g.ri] - takenSoFar) return; // forbidden
+    if (bid === g.rs[g.ri] - takenSoFar) return;
   }
-
   g.bids[playerIdx] = bid;
-  if (g.bids.every(b => b != null)) {
-    g.phase = 'play';
-    g.bp = -1;
-    g.cp = g.lp;
-    g.msg = '';
-  } else {
-    g.bp = (playerIdx + 1) % room.players.length;
-  }
-
+  if (g.bids.every(b => b != null)) { g.phase = 'play'; g.bp = -1; g.cp = g.lp; g.msg = ''; }
+  else { g.bp = (playerIdx + 1) % room.players.length; }
   broadcastRoom(roomCode);
   scheduleBots(roomCode);
 }
 
 function handlePlay(roomCode, playerIdx, cardId) {
-  const room = rooms.get(roomCode);
-  if (!room || !room.gameState) return;
+  const room = rooms.get(roomCode); if (!room || !room.gameState) return;
   const g = room.gameState;
-  if (g.phase !== 'play' || g.cp !== playerIdx) return;
-  if (g.trick.length >= room.players.length) return;
-
+  if (g.phase !== 'play' || g.cp !== playerIdx || g.trick.length >= room.players.length) return;
   const hand = g.hands[playerIdx];
-  const card = hand.find(c => c.id === cardId);
-  if (!card) return;
-
-  // Validate follow suit
+  const card = hand.find(c => c.id === cardId); if (!card) return;
   const lead = g.trick.length === 0 ? card.s : g.lead;
   if (g.trick.length > 0 && g.lead) {
     const hasSuit = hand.some(c => c.s === g.lead);
-    if (hasSuit && card.s !== g.lead) {
-      g.msg = `Tenés ${g.lead} — debés seguir el palo`;
-      broadcastRoom(roomCode);
-      return;
-    }
+    if (hasSuit && card.s !== g.lead) { g.msg = `Tenés ${g.lead} — debés seguir el palo`; broadcastRoom(roomCode); return; }
   }
-
   g.hands[playerIdx] = hand.filter(c => c.id !== cardId);
   g.trick.push({ p: playerIdx, c: card });
   g.lead = lead;
   g.cp = (playerIdx + 1) % room.players.length;
   g.msg = '';
-
   broadcastRoom(roomCode);
-
-  // Auto-resolve trick when all players have played
   if (g.trick.length === room.players.length) {
-    setTimeout(() => {
-      resolveTrick(roomCode);
-    }, 1100);
+    setTimeout(() => resolveTrick(roomCode), 1100);
   } else {
     scheduleBots(roomCode);
   }
 }
 
 function resolveTrick(roomCode) {
-  const room = rooms.get(roomCode);
-  if (!room || !room.gameState) return;
+  const room = rooms.get(roomCode); if (!room || !room.gameState) return;
   const g = room.gameState;
-
   const w = trickWin(g.trick, g.lead, g.trump);
   g.taken[w]++;
-  g.trick = [];
-  g.lead = null;
-
-  // Check if round is over
+  g.trick = []; g.lead = null;
   if (g.hands.every(h => h.length === 0)) {
     const rdSc = g.taken.map((got, i) => calcScore(room.scoring, g.bids[i], got));
     g.rdSc = rdSc;
     g.sc = g.sc.map((s, i) => s + rdSc[i]);
-    g.history.push({
-      ri: g.ri, cpp: g.rs[g.ri], trump: g.trump,
-      bids: [...g.bids], taken: [...g.taken], rdSc, totals: [...g.sc]
-    });
+    g.history.push({ ri: g.ri, cpp: g.rs[g.ri], trump: g.trump, bids: [...g.bids], taken: [...g.taken], rdSc, totals: [...g.sc] });
     g.phase = 'rend';
+    g.rendReadyCount = 0;
     broadcastRoom(roomCode);
   } else {
-    g.lp = w;
-    g.cp = w;
+    g.lp = w; g.cp = w;
     broadcastRoom(roomCode);
     scheduleBots(roomCode);
   }
 }
 
 function handleNextRound(roomCode) {
-  const room = rooms.get(roomCode);
-  if (!room || !room.gameState) return;
+  const room = rooms.get(roomCode); if (!room || !room.gameState) return;
   const g = room.gameState;
-
   const ri = g.ri + 1;
-  if (ri >= g.rs.length) {
-    g.phase = 'gend';
-    broadcastRoom(roomCode);
-    return;
-  }
-
+  if (ri >= g.rs.length) { g.phase = 'gend'; broadcastRoom(roomCode); return; }
   const dealer = (g.dealer + 1) % room.players.length;
   const deal = dealRound(g.rs, ri, dealer, room.players.length);
   Object.assign(g, deal, { ri, dealer, phase: 'bid', msg: '' });
-
   broadcastRoom(roomCode);
   scheduleBots(roomCode);
 }
 
-// ─── Socket Handlers ──────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
 
   socket.on('create_room', ({ name, maxPlayers, scoring }) => {
     const code = genCode();
     const room = {
-      code,
-      phase: 'lobby',
-      host: socket.id,
-      maxPlayers: maxPlayers || 4,
-      scoring: scoring || 'pablo',
-      gameState: null,
+      code, phase: 'lobby', host: socket.id,
+      maxPlayers: maxPlayers || 4, scoring: scoring || 'pablo',
+      gameState: null, chat: [],
       players: [{ id: socket.id, socketId: socket.id, name: name || 'Jugador 1', isBot: false }],
     };
     rooms.set(code, room);
     socket.join(code);
     socket.roomCode = code;
-    socket.playerIdx = 0;
     broadcastRoom(code);
   });
 
   socket.on('join_room', ({ code, name }) => {
-    const room = rooms.get(code.toUpperCase());
+    const upper = code.toUpperCase();
+    const room = rooms.get(upper);
     if (!room) { socket.emit('error', { message: 'Sala no encontrada. Revisá el código.' }); return; }
     if (room.phase !== 'lobby') { socket.emit('error', { message: 'La partida ya empezó.' }); return; }
     if (room.players.filter(p => !p.isBot).length >= room.maxPlayers) { socket.emit('error', { message: 'La sala está llena.' }); return; }
+    room.players.push({ id: socket.id, socketId: socket.id, name: name || `Jugador ${room.players.length + 1}`, isBot: false });
+    socket.join(upper); socket.roomCode = upper;
+    broadcastRoom(upper);
+  });
 
-    const idx = room.players.length;
-    room.players.push({ id: socket.id, socketId: socket.id, name: name || `Jugador ${idx + 1}`, isBot: false });
-    socket.join(code.toUpperCase());
-    socket.roomCode = code.toUpperCase();
-    socket.playerIdx = idx;
-    broadcastRoom(code.toUpperCase());
+  // Reconnect to an in-progress game
+  socket.on('reconnect_room', ({ code, name }) => {
+    const upper = code.toUpperCase();
+    const room = rooms.get(upper);
+    if (!room) { socket.emit('error', { message: 'Sala no encontrada o expirada.' }); return; }
+    // Find disconnected player with same name
+    const player = room.players.find(p => !p.isBot && !p.socketId && p.name === name);
+    if (!player) {
+      // Try to find by name even if connected (tab reload)
+      const existing = room.players.find(p => !p.isBot && p.name === name);
+      if (existing) {
+        existing.socketId = socket.id;
+        socket.join(upper); socket.roomCode = upper;
+        broadcastRoom(upper);
+      } else {
+        socket.emit('error', { message: 'No se encontró tu lugar en esta sala.' });
+      }
+      return;
+    }
+    player.socketId = socket.id;
+    socket.join(upper); socket.roomCode = upper;
+    broadcastRoom(upper);
+    scheduleBots(upper);
   });
 
   socket.on('add_bot', ({ roomCode }) => {
     const room = rooms.get(roomCode);
-    if (!room || room.phase !== 'lobby') return;
-    if (room.host !== socket.id) return;
-    if (room.players.length >= room.maxPlayers) return;
-    const botIdx = room.players.length;
+    if (!room || room.phase !== 'lobby' || room.host !== socket.id || room.players.length >= room.maxPlayers) return;
     const botNames = ['Bot Alfa', 'Bot Beta', 'Bot Gamma', 'Bot Delta'];
-    room.players.push({ id: null, socketId: null, name: botNames[botIdx % botNames.length], isBot: true });
+    room.players.push({ id: null, socketId: null, name: botNames[room.players.length % botNames.length], isBot: true });
     broadcastRoom(roomCode);
   });
 
   socket.on('remove_bot', ({ roomCode }) => {
     const room = rooms.get(roomCode);
-    if (!room || room.phase !== 'lobby') return;
-    if (room.host !== socket.id) return;
-    const lastBot = [...room.players].reverse().find(p => p.isBot);
-    if (lastBot) room.players.splice(room.players.lastIndexOf(lastBot), 1);
+    if (!room || room.phase !== 'lobby' || room.host !== socket.id) return;
+    for (let i = room.players.length - 1; i >= 0; i--) {
+      if (room.players[i].isBot) { room.players.splice(i, 1); break; }
+    }
     broadcastRoom(roomCode);
   });
 
   socket.on('start_game', ({ roomCode }) => {
     const room = rooms.get(roomCode);
-    if (!room || room.phase !== 'lobby') return;
-    if (room.host !== socket.id) return;
-    if (room.players.length < 4) { socket.emit('error', { message: 'Necesitás al menos 4 jugadores para empezar.' }); return; }
-
+    if (!room || room.phase !== 'lobby' || room.host !== socket.id) return;
+    if (room.players.length < 4) { socket.emit('error', { message: 'Necesitás al menos 4 jugadores.' }); return; }
     const n = room.players.length;
     const rs = mkRounds(n);
-    const deal = dealRound(rs, 0, 0, n);
-    room.gameState = {
-      ...deal,
-      rs, ri: 0, dealer: 0,
-      sc: Array(n).fill(0),
-      history: [],
-      phase: 'bid',
-      msg: '',
-    };
+    room.gameState = { ...dealRound(rs, 0, 0, n), rs, ri: 0, dealer: 0, sc: Array(n).fill(0), history: [], phase: 'bid', msg: '' };
     room.phase = 'game';
     broadcastRoom(roomCode);
     scheduleBots(roomCode);
   });
 
   socket.on('place_bid', ({ roomCode, bid }) => {
-    const room = rooms.get(roomCode);
-    if (!room) return;
+    const room = rooms.get(roomCode); if (!room) return;
     const idx = room.players.findIndex(p => p.socketId === socket.id);
-    if (idx < 0) return;
-    handleBid(roomCode, idx, bid);
+    if (idx >= 0) handleBid(roomCode, idx, bid);
   });
 
   socket.on('play_card', ({ roomCode, cardId }) => {
-    const room = rooms.get(roomCode);
-    if (!room) return;
+    const room = rooms.get(roomCode); if (!room) return;
     const idx = room.players.findIndex(p => p.socketId === socket.id);
-    if (idx < 0) return;
-    handlePlay(roomCode, idx, cardId);
+    if (idx >= 0) handlePlay(roomCode, idx, cardId);
   });
 
   socket.on('next_round', ({ roomCode }) => {
     handleNextRound(roomCode);
   });
 
-  socket.on('disconnect', () => {
-    const roomCode = socket.roomCode;
-    if (!roomCode) return;
-    const room = rooms.get(roomCode);
-    if (!room) return;
+  socket.on('chat_message', ({ roomCode, text }) => {
+    const room = rooms.get(roomCode); if (!room) return;
     const player = room.players.find(p => p.socketId === socket.id);
-    if (player) {
-      player.socketId = null; // Mark as disconnected but keep in game
-      broadcastRoom(roomCode);
-    }
-    // Clean up empty rooms
-    if (room.players.every(p => !p.socketId)) {
+    if (!player || !text || !text.trim()) return;
+    const msg = { name: player.name, text: text.trim().slice(0, 120), ts: Date.now() };
+    if (!room.chat) room.chat = [];
+    room.chat.push(msg);
+    if (room.chat.length > 100) room.chat.shift();
+    broadcastRoom(roomCode);
+  });
+
+  socket.on('disconnect', () => {
+    const roomCode = socket.roomCode; if (!roomCode) return;
+    const room = rooms.get(roomCode); if (!room) return;
+    const player = room.players.find(p => p.socketId === socket.id);
+    if (player) { player.socketId = null; broadcastRoom(roomCode); }
+    if (room.players.every(p => !p.socketId || p.isBot)) {
       if (botTimers.has(roomCode)) clearTimeout(botTimers.get(roomCode));
-      rooms.delete(roomCode);
+      // Give 10 minutes for reconnection before cleaning up
+      setTimeout(() => {
+        const r = rooms.get(roomCode);
+        if (r && r.players.every(p => !p.socketId || p.isBot)) {
+          botTimers.delete(roomCode);
+          rooms.delete(roomCode);
+        }
+      }, 10 * 60 * 1000);
     }
   });
 });
