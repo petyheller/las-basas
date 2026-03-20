@@ -1,0 +1,477 @@
+import { useEffect, useState, useRef } from 'react';
+import { io } from 'socket.io-client';
+
+const isRed = s => s === '♥' || s === '♦';
+const RV = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14};
+const sortH = h => {
+  const so = {'♠':0,'♥':1,'♦':2,'♣':3};
+  return [...h].sort((a, b) => so[a.s] - so[b.s] || RV[b.r] - RV[a.r]);
+};
+
+// ─── Card Components ──────────────────────────────────────────────────────────
+function CardFace({ c, sel, ok, onClick, small }) {
+  const r = isRed(c.s);
+  const W = small ? 34 : 58, H = small ? 50 : 82;
+  return (
+    <div onClick={onClick} style={{
+      width: W, height: H, background: '#fff',
+      border: `2px solid ${sel ? '#f59e0b' : '#d1d5db'}`, borderRadius: 6,
+      display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+      padding: '2px 4px', cursor: ok || sel ? 'pointer' : 'default',
+      boxShadow: sel ? '0 0 0 3px #fbbf24, 0 4px 8px rgba(0,0,0,.3)' : '0 2px 4px rgba(0,0,0,.25)',
+      transform: sel ? 'translateY(-14px)' : ok ? 'translateY(-4px)' : 'none',
+      transition: 'all .12s', color: r ? '#dc2626' : '#111827',
+      fontSize: small ? 9 : 11, userSelect: 'none', opacity: !ok && !sel ? .6 : 1, flexShrink: 0,
+    }}>
+      <div><b style={{ display: 'block', lineHeight: 1.1 }}>{c.r}</b><span>{c.s}</span></div>
+      <div style={{ textAlign: 'right' }}><span>{c.s}</span><b style={{ display: 'block', lineHeight: 1.1 }}>{c.r}</b></div>
+    </div>
+  );
+}
+function CardBack({ small }) {
+  return (
+    <div style={{
+      width: small ? 26 : 42, height: small ? 38 : 58,
+      background: 'linear-gradient(135deg,#1e40af,#3b82f6)',
+      border: '2px solid #93c5fd', borderRadius: 5,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      color: 'rgba(255,255,255,.12)', fontSize: small ? 9 : 12, flexShrink: 0,
+    }}>◆</div>
+  );
+}
+
+// ─── Scoreboard ───────────────────────────────────────────────────────────────
+function Scoreboard({ history, players, sc, scoring, onClose }) {
+  const n = players.length;
+  const tdS = { padding: '5px 9px', textAlign: 'center', borderBottom: '1px solid rgba(255,255,255,.07)', fontSize: 12 };
+  const thS = { padding: '6px 9px', textAlign: 'center', fontSize: 11, color: '#86efac', fontWeight: 'normal', borderBottom: '1px solid rgba(255,255,255,.18)', position: 'sticky', top: 0, background: '#0f3d22' };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.88)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', zIndex: 50, overflowY: 'auto', padding: '14px 8px' }}>
+      <div style={{ background: '#14532d', border: '2px solid #4ade80', borderRadius: 14, width: '100%', maxWidth: 860 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '13px 18px 10px', borderBottom: '1px solid rgba(255,255,255,.12)' }}>
+          <div>
+            <span style={{ fontSize: 17, fontWeight: 500 }}>📋 Pizarra</span>
+            <span style={{ marginLeft: 10, fontSize: 11, background: scoring === 'fer' ? 'rgba(251,191,36,.2)' : 'rgba(74,222,128,.15)', border: `1px solid ${scoring === 'fer' ? '#fbbf24' : '#4ade80'}`, borderRadius: 20, padding: '2px 10px', color: scoring === 'fer' ? '#fbbf24' : '#4ade80' }}>
+              {scoring === 'fer' ? 'A lo Fer' : 'A lo Pablo'}
+            </span>
+          </div>
+          <button onClick={onClose} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,.3)', color: '#fff', borderRadius: 6, padding: '4px 14px', cursor: 'pointer', fontSize: 13 }}>✕</button>
+        </div>
+        {history.length === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center', color: 'rgba(255,255,255,.4)', fontSize: 13 }}>Todavía no se completó ninguna ronda.</div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 480 }}>
+              <thead>
+                <tr>
+                  <th style={{ ...thS, textAlign: 'left', paddingLeft: 14 }}>Ronda</th>
+                  <th style={thS}>Ctas</th>
+                  <th style={thS}>Triunfo</th>
+                  {players.map((p, i) => (
+                    <th key={i} colSpan={3} style={{ ...thS, borderLeft: '1px solid rgba(255,255,255,.15)', color: i === 0 ? '#fbbf24' : '#86efac' }}>{p.name}</th>
+                  ))}
+                </tr>
+                <tr style={{ background: 'rgba(0,0,0,.25)' }}>
+                  <th style={thS} /><th style={thS} /><th style={thS} />
+                  {players.map((_, i) => ['Ap', 'Bz', 'Pts'].map(l => (
+                    <th key={i + l} style={{ ...thS, fontSize: 10, borderLeft: l === 'Ap' ? '1px solid rgba(255,255,255,.1)' : undefined }}>{l}</th>
+                  )))}
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((h, idx) => (
+                  <tr key={idx} style={{ background: idx % 2 === 0 ? 'rgba(255,255,255,.04)' : 'transparent' }}>
+                    <td style={{ ...tdS, textAlign: 'left', paddingLeft: 14, color: '#a3e4b8', fontWeight: 'bold' }}>{h.ri + 1}</td>
+                    <td style={tdS}>{h.cpp}</td>
+                    <td style={{ ...tdS, fontSize: 14, color: h.trump ? isRed(h.trump) ? '#f87171' : '#e2e8f0' : 'rgba(255,255,255,.3)' }}>{h.trump || '—'}</td>
+                    {players.map((_, i) => [
+                      <td key={i + 'a'} style={{ ...tdS, borderLeft: '1px solid rgba(255,255,255,.07)' }}>{h.bids[i]}</td>,
+                      <td key={i + 'b'} style={tdS}>{h.taken[i]}</td>,
+                      <td key={i + 'p'} style={{ ...tdS, fontWeight: 'bold', color: h.bids[i] === h.taken[i] ? '#4ade80' : '#f87171' }}>{h.rdSc[i] >= 0 ? '+' : ''}{h.rdSc[i]}</td>,
+                    ])}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: 'rgba(0,0,0,.35)', borderTop: '2px solid rgba(255,255,255,.25)' }}>
+                  <td colSpan={3} style={{ ...tdS, textAlign: 'left', paddingLeft: 14, color: '#86efac', fontWeight: 'bold' }}>Total</td>
+                  {players.map((_, i) => [
+                    <td key={i + 'a'} style={{ ...tdS, borderLeft: '1px solid rgba(255,255,255,.07)' }} />,
+                    <td key={i + 'b'} style={tdS} />,
+                    <td key={i + 't'} style={{ ...tdS, fontWeight: 'bold', fontSize: 16, color: i === 0 ? '#fbbf24' : '#fff' }}>{sc[i]}</td>,
+                  ])}
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+export default function App() {
+  const socketRef = useRef(null);
+  const [screen, setScreen] = useState('home'); // home | create | join | lobby | game
+  const [name, setName] = useState('');
+  const [joinCode, setJoinCode] = useState('');
+  const [setupN, setSetupN] = useState(4);
+  const [setupScoring, setSetupScoring] = useState('pablo');
+  const [g, setG] = useState(null);
+  const [sel, setSel] = useState(null);
+  const [showBoard, setShowBoard] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const socket = io();
+    socketRef.current = socket;
+
+    socket.on('game_update', (data) => {
+      setG(data);
+      setError('');
+      if (data.phase === 'lobby') setScreen('lobby');
+      else if (['bid', 'play', 'rend', 'gend'].includes(data.phase)) setScreen('game');
+    });
+
+    socket.on('error', ({ message }) => setError(message));
+
+    return () => socket.disconnect();
+  }, []);
+
+  const emit = (ev, data) => socketRef.current?.emit(ev, data);
+
+  const createRoom = () => {
+    if (!name.trim()) { setError('Ingresá tu nombre'); return; }
+    emit('create_room', { name: name.trim(), maxPlayers: setupN, scoring: setupScoring });
+  };
+
+  const joinRoom = () => {
+    if (!name.trim()) { setError('Ingresá tu nombre'); return; }
+    if (!joinCode.trim()) { setError('Ingresá el código de sala'); return; }
+    emit('join_room', { code: joinCode.trim().toUpperCase(), name: name.trim() });
+  };
+
+  const humanBid = (bid) => {
+    if (!g || g.bp !== g.yourIndex) return;
+    const filled = (g.bids || []).filter(b => b != null).length;
+    const isLast = filled === (g.n || 0) - 1;
+    if (isLast) {
+      const taken = (g.bids || []).reduce((s, b) => b != null ? s + b : s, 0);
+      if (bid === (g.rs?.[g.ri] || 0) - taken) { setError(`⚠️ No podés apostar ${bid} — el total no puede cerrar la ronda`); return; }
+    }
+    setError('');
+    emit('place_bid', { roomCode: g.roomCode, bid });
+  };
+
+  const humanPlay = (card) => {
+    if (!g || g.cp !== g.yourIndex || (g.trick || []).length >= g.n) return;
+    if (card !== sel) { setSel(card); return; }
+    setSel(null);
+    emit('play_card', { roomCode: g.roomCode, cardId: card.id });
+  };
+
+  const getOk = () => {
+    if (!g || g.cp !== g.yourIndex || g.phase !== 'play' || (g.trick || []).length >= g.n) return new Set();
+    const h = g.myHand || [];
+    if (!g.lead || (g.trick || []).length === 0) return new Set(h);
+    const hasSuit = h.some(c => c.s === g.lead);
+    return new Set(hasSuit ? h.filter(c => c.s === g.lead) : h);
+  };
+
+  // ── Styles ──
+  const gs = { background: '#14532d', minHeight: '100vh', padding: '10px 8px', fontFamily: 'system-ui,sans-serif', color: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 };
+  const cardStyle = { background: 'rgba(0,0,0,.2)', borderRadius: 12, padding: '18px 20px', marginBottom: 16, width: '100%', maxWidth: 480 };
+  const inputStyle = { width: '100%', padding: '10px 14px', borderRadius: 8, border: '1px solid rgba(255,255,255,.25)', background: 'rgba(255,255,255,.08)', color: '#fff', fontSize: 15, outline: 'none' };
+  const btnPrimary = { background: '#16a34a', color: '#fff', border: 'none', borderRadius: 10, padding: '12px 28px', fontSize: 15, fontWeight: 'bold', cursor: 'pointer' };
+  const btnSecondary = { background: 'rgba(255,255,255,.1)', color: '#fff', border: '1px solid rgba(255,255,255,.25)', borderRadius: 10, padding: '12px 24px', fontSize: 14, cursor: 'pointer' };
+  const optBtn = (active, onClick, children) => (
+    <button onClick={onClick} style={{ padding: '11px 18px', borderRadius: 10, border: `2px solid ${active ? '#4ade80' : 'rgba(255,255,255,.2)'}`, background: active ? 'rgba(22,163,74,.4)' : 'rgba(255,255,255,.05)', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: active ? 'bold' : 'normal', transition: 'all .15s' }}>
+      {children}
+    </button>
+  );
+
+  // ── HOME ──
+  if (screen === 'home') return (
+    <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
+      <div style={{ fontSize: 52, lineHeight: 1 }}>🂡</div>
+      <h1 style={{ fontSize: 34, margin: '8px 0 4px', fontWeight: 500 }}>Las Basas</h1>
+      <p style={{ color: '#86efac', marginBottom: 28, fontSize: 14 }}>Jugá online con amigos o contra bots</p>
+      <div style={cardStyle}>
+        <div style={{ color: '#86efac', fontSize: 13, marginBottom: 8, textAlign: 'left' }}>Tu nombre</div>
+        <input style={inputStyle} placeholder="Ej: Pablo" value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && name.trim() && setScreen('create')} />
+      </div>
+      {error && <div style={{ color: '#f87171', fontSize: 13, marginBottom: 8 }}>{error}</div>}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+        <button onClick={() => { if (!name.trim()) { setError('Ingresá tu nombre'); return; } setError(''); setScreen('create'); }} style={btnPrimary}>Crear sala</button>
+        <button onClick={() => { if (!name.trim()) { setError('Ingresá tu nombre'); return; } setError(''); setScreen('join'); }} style={btnSecondary}>Unirse a sala</button>
+      </div>
+    </div>
+  );
+
+  // ── CREATE ──
+  if (screen === 'create') return (
+    <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
+      <h2 style={{ fontSize: 24, fontWeight: 500, marginBottom: 20 }}>Crear sala</h2>
+      <div style={cardStyle}>
+        <div style={{ color: '#86efac', fontSize: 13, marginBottom: 8, textAlign: 'left' }}>Jugadores</div>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
+          {[4, 5].map(n => optBtn(setupN === n, () => setSetupN(n), `${n} jugadores`))}
+        </div>
+      </div>
+      <div style={cardStyle}>
+        <div style={{ color: '#86efac', fontSize: 13, marginBottom: 8, textAlign: 'left' }}>Sistema de puntos</div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {optBtn(setupScoring === 'pablo', () => setSetupScoring('pablo'), <span>A lo Pablo<br /><span style={{ fontSize: 11, fontWeight: 'normal', color: '#86efac' }}>Acertar: 10+ap²</span></span>)}
+          {optBtn(setupScoring === 'fer', () => setSetupScoring('fer'), <span>A lo Fer<br /><span style={{ fontSize: 11, fontWeight: 'normal', color: '#86efac' }}>Acertar: 10×ap (0→5)</span></span>)}
+        </div>
+      </div>
+      {error && <div style={{ color: '#f87171', fontSize: 13, marginBottom: 8 }}>{error}</div>}
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button onClick={() => setScreen('home')} style={btnSecondary}>← Volver</button>
+        <button onClick={createRoom} style={btnPrimary}>Crear sala</button>
+      </div>
+    </div>
+  );
+
+  // ── JOIN ──
+  if (screen === 'join') return (
+    <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
+      <h2 style={{ fontSize: 24, fontWeight: 500, marginBottom: 20 }}>Unirse a sala</h2>
+      <div style={cardStyle}>
+        <div style={{ color: '#86efac', fontSize: 13, marginBottom: 8, textAlign: 'left' }}>Código de sala</div>
+        <input style={{ ...inputStyle, textTransform: 'uppercase', letterSpacing: 6, fontSize: 22, textAlign: 'center' }}
+          placeholder="XXXX" maxLength={4} value={joinCode}
+          onChange={e => setJoinCode(e.target.value.toUpperCase())}
+          onKeyDown={e => e.key === 'Enter' && joinRoom()} />
+      </div>
+      {error && <div style={{ color: '#f87171', fontSize: 13, marginBottom: 8 }}>{error}</div>}
+      <div style={{ display: 'flex', gap: 12 }}>
+        <button onClick={() => setScreen('home')} style={btnSecondary}>← Volver</button>
+        <button onClick={joinRoom} style={btnPrimary}>Unirse</button>
+      </div>
+    </div>
+  );
+
+  // ── LOBBY ──
+  if (screen === 'lobby' && g) return (
+    <div style={{ ...gs, justifyContent: 'center', textAlign: 'center' }}>
+      <div style={{ fontSize: 44, lineHeight: 1 }}>🂡</div>
+      <h2 style={{ fontSize: 24, fontWeight: 500, marginBottom: 4 }}>Sala de espera</h2>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+        <span style={{ color: '#86efac', fontSize: 14 }}>Código:</span>
+        <span style={{ background: 'rgba(0,0,0,.3)', border: '2px solid #4ade80', borderRadius: 8, padding: '6px 18px', fontSize: 26, fontWeight: 'bold', letterSpacing: 6 }}>{g.roomCode}</span>
+        <button onClick={() => navigator.clipboard?.writeText(g.roomCode)} style={{ ...btnSecondary, padding: '6px 12px', fontSize: 12 }}>Copiar</button>
+      </div>
+      <div style={{ ...cardStyle, textAlign: 'left' }}>
+        <div style={{ color: '#86efac', fontSize: 13, marginBottom: 10 }}>Jugadores ({(g.players || []).length}/{g.maxPlayers})</div>
+        {(g.players || []).map((p, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid rgba(255,255,255,.08)' }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: p.connected || p.isBot ? '#4ade80' : '#6b7280' }} />
+            <span style={{ flex: 1 }}>{p.name}</span>
+            {p.isBot && <span style={{ fontSize: 11, background: 'rgba(251,191,36,.2)', border: '1px solid #fbbf24', borderRadius: 20, padding: '2px 8px', color: '#fbbf24' }}>Bot</span>}
+            {i === 0 && !p.isBot && <span style={{ fontSize: 11, color: '#86efac' }}>Host</span>}
+          </div>
+        ))}
+      </div>
+      <div style={{ color: '#86efac', fontSize: 12, marginBottom: 4 }}>
+        Sistema: <b style={{ color: g.scoring === 'fer' ? '#fbbf24' : '#4ade80' }}>{g.scoring === 'fer' ? 'A lo Fer' : 'A lo Pablo'}</b>
+      </div>
+      {error && <div style={{ color: '#f87171', fontSize: 13, marginBottom: 8 }}>{error}</div>}
+      {g.isHost && (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'center', marginTop: 8 }}>
+          {(g.players || []).length < g.maxPlayers && (
+            <button onClick={() => emit('add_bot', { roomCode: g.roomCode })} style={btnSecondary}>+ Agregar bot</button>
+          )}
+          {(g.players || []).some(p => p.isBot) && (
+            <button onClick={() => emit('remove_bot', { roomCode: g.roomCode })} style={{ ...btnSecondary, color: '#f87171', borderColor: '#f87171' }}>− Quitar bot</button>
+          )}
+          <button onClick={() => emit('start_game', { roomCode: g.roomCode })} style={{ ...btnPrimary, opacity: (g.players || []).length < 4 ? .5 : 1 }}
+            disabled={(g.players || []).length < 4}>
+            {(g.players || []).length < 4 ? `Faltan ${4 - (g.players || []).length} jugadores` : '¡Arrancar!'}
+          </button>
+        </div>
+      )}
+      {!g.isHost && <p style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, marginTop: 8 }}>Esperando que el host arranque la partida...</p>}
+    </div>
+  );
+
+  // ── GAME ──
+  if (screen === 'game' && g) {
+    const ok = getOk();
+    const cpp = g.rs?.[g.ri] || 0;
+    const hand = sortH(g.myHand || []);
+    const players = g.players || [];
+
+    return (
+      <div style={{ ...gs, position: 'relative' }}>
+        {/* Top bar */}
+        <div style={{ width: '100%', maxWidth: 820, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <b style={{ fontSize: 17 }}>🂡 Las Basas</b>
+            <span style={{ fontSize: 11, background: g.scoring === 'fer' ? 'rgba(251,191,36,.2)' : 'rgba(74,222,128,.15)', border: `1px solid ${g.scoring === 'fer' ? '#fbbf24' : '#4ade80'}`, borderRadius: 20, padding: '2px 8px', color: g.scoring === 'fer' ? '#fbbf24' : '#4ade80' }}>
+              {g.scoring === 'fer' ? 'A lo Fer' : 'A lo Pablo'}
+            </span>
+            <span style={{ color: '#86efac', fontSize: 12 }}>Ronda {(g.ri || 0) + 1}/{g.rs?.length || 0} — {cpp} carta{cpp !== 1 ? 's' : ''}</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {g.tCard
+              ? <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 11, color: '#86efac' }}>Triunfo:</span>
+                  <CardFace c={g.tCard} small ok={false} />
+                  <span style={{ fontSize: 20, color: isRed(g.trump) ? '#f87171' : '#e2e8f0' }}>{g.trump}</span>
+                </div>
+              : <span style={{ color: '#fbbf24', fontWeight: 'bold', fontSize: 12 }}>Sin triunfo</span>
+            }
+            <button onClick={() => setShowBoard(true)} style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.25)', color: '#fff', borderRadius: 8, padding: '6px 13px', cursor: 'pointer', fontSize: 12 }}>📋 Pizarra</button>
+          </div>
+        </div>
+
+        {/* Score bar */}
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'center', width: '100%', maxWidth: 820 }}>
+          {players.map((p, i) => (
+            <div key={i} style={{ flex: 1, minWidth: 80, textAlign: 'center', background: i === g.yourIndex ? 'rgba(22,163,74,.35)' : 'rgba(255,255,255,.06)', border: `1px solid ${i === g.yourIndex ? '#4ade80' : '#2d3748'}`, borderRadius: 8, padding: '5px 6px' }}>
+              <div style={{ fontSize: 10, color: p.isBot ? '#fbbf24' : '#86efac', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}{!p.connected && !p.isBot ? ' ✗' : ''}</div>
+              <div style={{ fontSize: 18, fontWeight: 'bold', lineHeight: 1.2 }}>{(g.sc || [])[i] || 0}</div>
+              {(g.bids || [])[i] != null && <div style={{ fontSize: 10, color: '#fbbf24' }}>Ap:{g.bids[i]} Bz:{(g.taken || [])[i] || 0}</div>}
+            </div>
+          ))}
+        </div>
+
+        {/* Other players hands */}
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center', width: '100%', maxWidth: 820 }}>
+          {players.map((p, i) => {
+            if (i === g.yourIndex) return null;
+            const hl = (g.handCounts || [])[i] || 0;
+            const active = (g.phase === 'play' && g.cp === i) || (g.phase === 'bid' && g.bp === i);
+            return (
+              <div key={i} style={{ textAlign: 'center', opacity: active ? 1 : .6, transition: 'opacity .3s' }}>
+                <div style={{ fontSize: 10, color: active ? '#fbbf24' : '#86efac', marginBottom: 3, fontWeight: active ? 'bold' : 'normal' }}>
+                  {p.name}{g.phase === 'bid' && g.bp === i ? ' ✏️' : g.phase === 'play' && g.cp === i ? ' 🎯' : ''}
+                </div>
+                <div style={{ display: 'flex', gap: 2, justifyContent: 'center', flexWrap: 'wrap', maxWidth: 180 }}>
+                  {Array.from({ length: Math.min(hl, 10) }, (_, j) => <CardBack key={j} small />)}
+                  {hl > 10 && <span style={{ alignSelf: 'center', fontSize: 10 }}>+{hl - 10}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Table */}
+        <div style={{ background: 'rgba(0,0,0,.2)', border: '1px solid rgba(255,255,255,.08)', borderRadius: 14, padding: 14, width: '100%', maxWidth: 820, minHeight: 105, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, flexWrap: 'wrap' }}>
+          {(g.trick || []).length === 0
+            ? <span style={{ color: 'rgba(255,255,255,.25)', fontSize: 13 }}>{g.phase === 'play' ? g.cp === g.yourIndex ? 'Tu turno — elegí una carta' : 'Esperando...' : 'Mesa vacía'}</span>
+            : (g.trick || []).map(({ p, c }) => (
+                <div key={p} style={{ textAlign: 'center' }}>
+                  <div style={{ fontSize: 9, color: '#86efac', marginBottom: 3 }}>{(players[p] || {}).name}</div>
+                  <CardFace c={c} ok={false} />
+                </div>
+              ))
+          }
+        </div>
+
+        {/* Messages */}
+        <div style={{ color: '#fbbf24', fontSize: 12, textAlign: 'center', minHeight: 18 }}>{g.msg || error || ''}</div>
+
+        {/* Bid phase */}
+        {g.phase === 'bid' && g.bp === g.yourIndex && (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ color: '#86efac', fontSize: 13, marginBottom: 6 }}>¿Cuántas bazas vas a ganar?</div>
+            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', justifyContent: 'center' }}>
+              {Array.from({ length: cpp + 1 }, (_, bid) => {
+                const filled = (g.bids || []).filter(b => b != null).length;
+                const isLast = filled === g.n - 1;
+                const taken = (g.bids || []).reduce((s, b) => b != null ? s + b : s, 0);
+                const banned = isLast && bid === cpp - taken;
+                return (
+                  <button key={bid} onClick={() => humanBid(bid)} disabled={banned} style={{ width: 44, height: 44, borderRadius: 8, border: 'none', background: banned ? '#374151' : '#16a34a', color: banned ? '#4b5563' : '#fff', fontSize: 17, fontWeight: 'bold', cursor: banned ? 'not-allowed' : 'pointer', boxShadow: banned ? 'none' : '0 2px 6px rgba(0,0,0,.25)' }}>{bid}</button>
+                );
+              })}
+            </div>
+            {(g.bids || []).filter(b => b != null).length === g.n - 1 && <div style={{ fontSize: 10, color: 'rgba(255,255,255,.4)', marginTop: 5 }}>Sos el último en apostar</div>}
+          </div>
+        )}
+        {g.phase === 'bid' && g.bp !== g.yourIndex && g.bp >= 0 && (
+          <div style={{ color: '#86efac', fontSize: 12 }}>{(players[g.bp] || {}).name} está apostando...</div>
+        )}
+
+        {/* Hand */}
+        {g.phase !== 'rend' && g.phase !== 'gend' && (
+          <div style={{ width: '100%', maxWidth: 820, marginTop: 4 }}>
+            <div style={{ fontSize: 11, color: '#86efac', textAlign: 'center', marginBottom: 5 }}>
+              Tu mano ({hand.length})
+              {(g.bids || [])[g.yourIndex] != null && ` — Apostaste ${g.bids[g.yourIndex]} — Ganaste ${(g.taken || [])[g.yourIndex] || 0}`}
+              {g.phase === 'play' && g.cp === g.yourIndex && ' — ¡Tu turno!'}
+              {sel && g.cp === g.yourIndex && ' — Clic de nuevo para confirmar'}
+            </div>
+            <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'center' }}>
+              {hand.map((c, i) => <CardFace key={c.id || i} c={c} sel={sel === c} ok={ok.has(c)} onClick={() => humanPlay(c)} />)}
+            </div>
+          </div>
+        )}
+
+        {/* Round end */}
+        {g.phase === 'rend' && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
+            <div style={{ background: '#166534', border: '2px solid #4ade80', borderRadius: 14, padding: 24, minWidth: 300, textAlign: 'center', maxWidth: 400, width: '100%' }}>
+              <h3 style={{ margin: '0 0 14px', fontSize: 20, fontWeight: 500 }}>Fin de ronda {(g.ri || 0) + 1}</h3>
+              <table style={{ margin: '0 auto', borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+                <thead><tr style={{ color: '#86efac', fontSize: 11 }}>{['Jugador', 'Ap', 'Bazas', 'Pts', 'Total'].map(h => <th key={h} style={{ padding: '3px 8px' }}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {players.map((p, i) => (
+                    <tr key={i} style={{ background: i === g.yourIndex ? 'rgba(255,255,255,.08)' : undefined }}>
+                      <td style={{ padding: '4px 8px' }}>{p.name}</td>
+                      <td style={{ padding: '4px 8px' }}>{(g.bids || [])[i]}</td>
+                      <td style={{ padding: '4px 8px' }}>{(g.taken || [])[i]}</td>
+                      <td style={{ padding: '4px 8px', color: ((g.rdSc || [])[i] || 0) >= 0 ? '#4ade80' : '#f87171', fontWeight: 'bold' }}>{((g.rdSc || [])[i] || 0) >= 0 ? '+' : ''}{(g.rdSc || [])[i] || 0}</td>
+                      <td style={{ padding: '4px 8px', fontWeight: 'bold' }}>{(g.sc || [])[i] || 0}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 18, flexWrap: 'wrap' }}>
+                <button onClick={() => setShowBoard(true)} style={{ background: 'rgba(255,255,255,.12)', color: '#fff', border: '1px solid rgba(255,255,255,.3)', borderRadius: 8, padding: '10px 16px', fontSize: 13, cursor: 'pointer' }}>📋 Pizarra</button>
+                {g.isHost && <button onClick={() => emit('next_round', { roomCode: g.roomCode })} style={{ ...btnPrimary, fontSize: 14 }}>{(g.ri || 0) + 1 >= (g.rs?.length || 1) - 1 ? 'Ver resultado' : 'Siguiente ronda →'}</button>}
+                {!g.isHost && <span style={{ color: 'rgba(255,255,255,.5)', fontSize: 13, alignSelf: 'center' }}>Esperando al host...</span>}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Game end */}
+        {g.phase === 'gend' && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
+            <div style={{ background: '#166534', border: '2px solid #fbbf24', borderRadius: 14, padding: 28, minWidth: 300, textAlign: 'center', maxWidth: 380, width: '100%' }}>
+              <div style={{ fontSize: 44, lineHeight: 1 }}>🏆</div>
+              <h2 style={{ margin: '8px 0', fontSize: 24, fontWeight: 500 }}>¡Fin del juego!</h2>
+              {(() => {
+                const mx = Math.max(...(g.sc || [0]));
+                const wi = (g.sc || []).findIndex(s => s === mx);
+                return <p style={{ color: '#fbbf24', fontSize: 16, margin: '0 0 14px' }}>{wi === g.yourIndex ? '¡Ganaste!' : `Ganó ${(players[wi] || {}).name}`} con {mx} puntos</p>;
+              })()}
+              <table style={{ margin: '0 auto 16px', borderCollapse: 'collapse', width: '100%', fontSize: 14 }}>
+                <tbody>
+                  {[...(g.sc || []).map((s, i) => ({ i, s }))].sort((a, b) => b.s - a.s).map(({ i, s }, pos) => (
+                    <tr key={i} style={{ background: i === g.yourIndex ? 'rgba(255,255,255,.1)' : undefined }}>
+                      <td style={{ padding: '5px 12px', textAlign: 'left', color: pos === 0 ? '#fbbf24' : 'inherit' }}>{pos === 0 ? '🥇 ' : pos === 1 ? '🥈 ' : pos === 2 ? '🥉 ' : ''}{(players[i] || {}).name}</td>
+                      <td style={{ padding: '5px 12px', fontWeight: 'bold', fontSize: 20, color: pos === 0 ? '#fbbf24' : 'inherit' }}>{s}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button onClick={() => setShowBoard(true)} style={{ background: 'rgba(255,255,255,.12)', color: '#fff', border: '1px solid rgba(255,255,255,.3)', borderRadius: 8, padding: '10px 16px', fontSize: 13, cursor: 'pointer' }}>📋 Pizarra</button>
+                <button onClick={() => window.location.reload()} style={{ ...btnPrimary, fontSize: 13 }}>Nueva partida</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showBoard && <Scoreboard history={g.history || []} players={players} sc={g.sc || []} scoring={g.scoring} onClose={() => setShowBoard(false)} />}
+      </div>
+    );
+  }
+
+  return <div style={{ ...gs, justifyContent: 'center' }}><div style={{ color: '#86efac' }}>Conectando...</div></div>;
+}
