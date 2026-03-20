@@ -100,7 +100,7 @@ function dealRound(rs, ri, dealer, n) {
   let trump = null, tCard = null;
   if (cpp < max) { tCard = deck[cpp * n]; trump = tCard.s; }
   const fb = (dealer + 1) % n;
-  return { hands, trump, tCard, bids: Array(n).fill(null), bp: fb, taken: Array(n).fill(0), trick: [], lp: fb, cp: fb, lead: null, rdSc: [] };
+  return { hands, trump, tCard, bids: Array(n).fill(null), bp: fb, taken: Array(n).fill(0), trick: [], lp: fb, cp: fb, lead: null, rdSc: [], trickLog: [] };
 }
 
 const rooms = new Map();
@@ -136,7 +136,7 @@ function broadcastRoom(roomCode) {
       payload.ri = g.ri; payload.rs = g.rs; payload.sc = g.sc;
       payload.history = g.history; payload.trump = g.trump; payload.tCard = g.tCard;
       payload.bids = g.bids; payload.bp = g.bp; payload.taken = g.taken;
-      payload.trick = g.trick; payload.lead = g.lead; payload.rdSc = g.rdSc;
+      payload.trick = g.trick; payload.lead = g.lead; payload.rdSc = g.rdSc; payload.trickLog = g.trickLog || [];
       payload.cp = g.cp; payload.lp = g.lp; payload.dealer = g.dealer;
       payload.n = room.players.length;
       payload.myHand = g.hands[idx] || [];
@@ -225,6 +225,8 @@ function resolveTrick(roomCode) {
   const g = room.gameState;
   const w = trickWin(g.trick, g.lead, g.trump);
   g.taken[w]++;
+  if (!g.trickLog) g.trickLog = [];
+  g.trickLog.push({ cards: g.trick.map(t => ({ p: t.p, c: t.c })), winner: w, lead: g.lead });
   g.trick = []; g.lead = null;
   if (g.hands.every(h => h.length === 0)) {
     const rdSc = g.taken.map((got, i) => calcScore(room.scoring, g.bids[i], got));
