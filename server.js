@@ -51,9 +51,11 @@ function trickWin(trick, lead, trump) {
     if (beats(trick[i].c, trick[w].c, lead, trump)) w = i;
   return trick[w].p;
 }
-function calcScore(scoring, bid, got) {
+function calcScore(scoring, bid, got, trump) {
   const d = Math.abs(got - bid);
-  if (d !== 0) return -10 * d;
+  if (d !== 0) return (!trump && bid === 0) ? -20 * d : -10 * d;
+  // No-trump round: bid 0 and hit = 50pts (both systems)
+  if (!trump && bid === 0) return 50;
   if (scoring === 'fer') return bid === 0 ? 5 : 10 * bid;
   return 10 + bid * bid;
 }
@@ -231,7 +233,7 @@ function resolveTrick(roomCode) {
   g.lastTrick = completedTrick;
   g.trick = []; g.lead = null;
   if (g.hands.every(h => h.length === 0)) {
-    const rdSc = g.taken.map((got, i) => calcScore(room.scoring, g.bids[i], got));
+    const rdSc = g.taken.map((got, i) => calcScore(room.scoring, g.bids[i], got, g.trump));
     g.rdSc = rdSc;
     g.sc = g.sc.map((s, i) => s + rdSc[i]);
     g.history.push({ ri: g.ri, cpp: g.rs[g.ri], trump: g.trump, bids: [...g.bids], taken: [...g.taken], rdSc, totals: [...g.sc] });
