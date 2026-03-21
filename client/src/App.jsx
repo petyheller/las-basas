@@ -185,18 +185,7 @@ function GameTable({ g, players, onBid, onPlay, sel, setSel, error }) {
           <div style={{position:'absolute',left:'50%',top:'50%',transform:'translate(-50%,-50%)',fontSize:10,color:'rgba(255,255,255,.2)',zIndex:2}}>sin triunfo</div>
         )}
 
-        {/* Last trick (ghost, behind current) */}
-        {g.lastTrick && g.phase==='play' && Object.keys(trickMap).length === 0 &&
-          g.lastTrick.cards.map(({p,c}) => (
-            <TableCard key={'lt'+p} c={c} pos={positions[relPos(p)]} isWinner={p===lastTrickWinner} isLastTrick={true}/>
-          ))
-        }
-        {/* Last trick stays visible under current trick cards */}
-        {g.lastTrick && g.phase==='play' && Object.keys(trickMap).length > 0 &&
-          g.lastTrick.cards.map(({p,c}) => (
-            !trickMap[p] && <TableCard key={'ltb'+p} c={c} pos={positions[relPos(p)]} isWinner={p===lastTrickWinner} isLastTrick={true}/>
-          ))
-        }
+
 
         {/* Current trick cards */}
         {Object.entries(trickMap).map(([p,c]) => (
