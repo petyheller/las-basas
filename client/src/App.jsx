@@ -168,21 +168,23 @@ function GameTable({ g, players, onBid, onPlay, sel, setSel, error }) {
           pointerEvents:'none',
         }}/>
 
-        {/* Trump indicator center */}
+        {/* Trump card center */}
         {g.tCard && (
           <div style={{
             position:'absolute',left:'50%',top:'50%',
             transform:'translate(-50%,-50%)',
-            display:'flex',alignItems:'center',gap:4,
-            background:'rgba(0,0,0,.35)',borderRadius:8,padding:'3px 8px',
-            border:'1px solid rgba(255,255,255,.1)',zIndex:2,
+            display:'flex',flexDirection:'column',alignItems:'center',gap:4,
+            zIndex:2,
           }}>
-            <span style={{fontSize:9,color:'rgba(255,255,255,.5)'}}>triunfo</span>
-            <span style={{fontSize:16,color:isRed(g.trump)?'#f87171':'#e2e8f0'}}>{g.trump}</span>
+            <div style={{transform:'rotate(15deg)',filter:'drop-shadow(0 3px 8px rgba(0,0,0,.6))'}}>
+              <CardFace c={g.tCard} ok={false} size='md'/>
+            </div>
           </div>
         )}
-        {!g.tCard && g.phase==='play' && (
-          <div style={{position:'absolute',left:'50%',top:'50%',transform:'translate(-50%,-50%)',fontSize:10,color:'rgba(255,255,255,.2)',zIndex:2}}>sin triunfo</div>
+        {!g.tCard && (
+          <div style={{position:'absolute',left:'50%',top:'50%',transform:'translate(-50%,-50%)',fontSize:10,color:'rgba(255,255,255,.18)',zIndex:2,textAlign:'center',lineHeight:1.4}}>
+            sin<br/>triunfo
+          </div>
         )}
 
 
