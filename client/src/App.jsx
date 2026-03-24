@@ -1,18 +1,23 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
 const isRed = s => s === '♥' || s === '♦';
 const RV = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14};
+const HIGH = new Set(['A','K','Q','J']);
 const sortH = h => {
   const so = {'♠':0,'♥':1,'♦':2,'♣':3};
-  return [...h].sort((a, b) => so[a.s] - so[b.s] || RV[b.r] - RV[a.r]);
+  return [...h].sort((a,b) => so[a.s]-so[b.s] || RV[b.r]-RV[a.r]);
 };
 
+// Timer helpers
+const bidTimeLimit = cpp => cpp <= 8 ? 60 : cpp <= 11 ? 120 : 180;
+const playTimeLimit = cpp => cpp <= 5 ? 20 : 20 + (cpp - 5) * 5;
+
 // ─── Card components ──────────────────────────────────────────────────────────
-function CardFace({ c, sel, ok, onClick, size = 'md' }) {
+function CardFace({ c, sel, ok, onClick, size='md' }) {
   const r = isRed(c.s);
-  const dims = { sm: [34,50,9,6], md: [52,74,10,6], lg: [58,82,11,6], xs: [22,32,8,3] };
-  const [W,H,fs,pad] = dims[size] || dims.md;
+  const dims = { sm:[34,50,9,6], md:[52,74,10,6], lg:[58,82,11,6], xs:[22,32,8,3] };
+  const [W,H,fs,pad] = dims[size]||dims.md;
   return (
     <div onClick={onClick} style={{
       width:W, height:H, background:'#fff',
@@ -37,108 +42,186 @@ function CardBack({ size='sm' }) {
   );
 }
 
+// ─── Countdown timer display ──────────────────────────────────────────────────
+function Countdown({ seconds, total }) {
+  const pct = seconds / total;
+  const color = pct > 0.5 ? '#4ade80' : pct > 0.25 ? '#fbbf24' : '#f87171';
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:6}}>
+      <div style={{width:32,height:32,position:'relative',flexShrink:0}}>
+        <svg width={32} height={32} style={{transform:'rotate(-90deg)'}}>
+          <circle cx={16} cy={16} r={13} fill='none' stroke='rgba(255,255,255,.1)' strokeWidth={3}/>
+          <circle cx={16} cy={16} r={13} fill='none' stroke={color} strokeWidth={3}
+            strokeDasharray={`${2*Math.PI*13}`}
+            strokeDashoffset={`${2*Math.PI*13*(1-pct)}`}
+            style={{transition:'stroke-dashoffset .9s linear,stroke .3s'}}/>
+        </svg>
+        <span style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:'bold',color}}>{seconds}</span>
+      </div>
+    </div>
+  );
+}
+
 // ─── Table positions ──────────────────────────────────────────────────────────
-// For each relative seat index (0=you/bottom, going clockwise):
-// seat: where the player nameplate sits (% of table width/height)
-// card: where the played card appears on the table
 const POSITIONS = {
   4: [
-    { seat:{x:50,y:94}, card:{x:50,y:66}, label:'bottom' },
-    { seat:{x:94,y:50}, card:{x:69,y:50}, label:'right' },
-    { seat:{x:50,y:6},  card:{x:50,y:34}, label:'top' },
-    { seat:{x:6,y:50},  card:{x:31,y:50}, label:'left' },
+    { seat:{x:50,y:94}, card:{x:50,y:66} },
+    { seat:{x:94,y:50}, card:{x:69,y:50} },
+    { seat:{x:50,y:6},  card:{x:50,y:34} },
+    { seat:{x:6,y:50},  card:{x:31,y:50} },
   ],
   5: [
-    { seat:{x:50,y:94},  card:{x:50,y:67}, label:'bottom' },
-    { seat:{x:88,y:72},  card:{x:65,y:61}, label:'right-bottom' },
-    { seat:{x:88,y:22},  card:{x:65,y:39}, label:'right-top' },
-    { seat:{x:12,y:22},  card:{x:35,y:39}, label:'left-top' },
-    { seat:{x:12,y:72},  card:{x:35,y:61}, label:'left-bottom' },
+    { seat:{x:50,y:94},  card:{x:50,y:67} },
+    { seat:{x:88,y:72},  card:{x:65,y:61} },
+    { seat:{x:88,y:22},  card:{x:65,y:39} },
+    { seat:{x:12,y:22},  card:{x:35,y:39} },
+    { seat:{x:12,y:72},  card:{x:35,y:61} },
   ],
 };
 
-// Scorecard / info plate for each player on the table
-function PlayerSeat({ player, bid, taken, score, active, bidding, isYou, pos, n }) {
-  const isLeft = pos.seat.x < 30;
-  const isRight = pos.seat.x > 70;
-  const isTop = pos.seat.y < 30;
-  const isBottom = pos.seat.y > 70;
-  const textAlign = isLeft ? 'right' : isRight ? 'left' : 'center';
-
+function PlayerSeat({ player, bid, taken, score, active, bidding, isYou, pos }) {
   return (
-    <div style={{
-      position:'absolute',
-      left:`${pos.seat.x}%`, top:`${pos.seat.y}%`,
-      transform:'translate(-50%,-50%)',
-      zIndex:2, pointerEvents:'none',
-      minWidth: isBottom&&isYou ? 110 : 90,
-    }}>
-      <div style={{
-        background: isYou ? 'rgba(22,163,74,.45)' : active ? 'rgba(251,191,36,.2)' : 'rgba(0,0,0,.45)',
-        border:`1.5px solid ${isYou?'#4ade80':active?'#fbbf24':'rgba(255,255,255,.15)'}`,
-        borderRadius:10, padding:'5px 9px', textAlign,
-        backdropFilter:'blur(4px)',
-      }}>
+    <div style={{position:'absolute',left:`${pos.seat.x}%`,top:`${pos.seat.y}%`,transform:'translate(-50%,-50%)',zIndex:2,pointerEvents:'none',minWidth:90}}>
+      <div style={{background:isYou?'rgba(22,163,74,.45)':active?'rgba(251,191,36,.2)':'rgba(0,0,0,.45)',border:`1.5px solid ${isYou?'#4ade80':active?'#fbbf24':'rgba(255,255,255,.15)'}`,borderRadius:10,padding:'5px 9px',textAlign:'center',backdropFilter:'blur(4px)'}}>
         <div style={{fontSize:11,fontWeight:'bold',color:isYou?'#4ade80':active?'#fbbf24':'#e2e8f0',whiteSpace:'nowrap',overflow:'hidden',maxWidth:90,textOverflow:'ellipsis'}}>
           {player.name}{!player.connected&&!player.isBot?' ✗':''}
           {player.isBot&&<span style={{marginLeft:4,fontSize:9,color:'#fbbf24',background:'rgba(251,191,36,.15)',borderRadius:8,padding:'1px 4px'}}>bot</span>}
         </div>
         <div style={{fontSize:13,fontWeight:'bold',color:'#fff',lineHeight:1.2}}>{score}</div>
         {bid!=null&&<div style={{fontSize:10,color:'#fbbf24'}}>Ap:{bid} Bz:{taken||0}</div>}
-        {bidding&&<div style={{fontSize:10,color:'#fbbf24',animation:'pulse 1s infinite'}}>apostando...</div>}
+        {bidding&&<div style={{fontSize:10,color:'#fbbf24'}}>apostando...</div>}
       </div>
     </div>
   );
 }
 
-// Card played on the table at player's position
-function TableCard({ c, pos, isWinner, isLastTrick }) {
+function TableCard({ c, pos }) {
   return (
-    <div style={{
-      position:'absolute',
-      left:`${pos.card.x}%`, top:`${pos.card.y}%`,
-      transform:'translate(-50%,-50%)',
-      zIndex: isLastTrick ? 1 : 3,
-      opacity: isLastTrick ? 0.38 : 1,
-      transition:'all .25s',
-    }}>
-      {isWinner&&!isLastTrick&&(
-        <div style={{position:'absolute',top:-14,left:'50%',transform:'translateX(-50%)',fontSize:12,zIndex:4}}>🏆</div>
-      )}
+    <div style={{position:'absolute',left:`${pos.card.x}%`,top:`${pos.card.y}%`,transform:'translate(-50%,-50%)',zIndex:3,transition:'all .25s'}}>
       <CardFace c={c} ok={false} size='md'/>
     </div>
   );
 }
 
-// ─── Main table view ──────────────────────────────────────────────────────────
-function GameTable({ g, players, onBid, onPlay, sel, setSel, error }) {
+// ─── Bid summary ──────────────────────────────────────────────────────────────
+function BidSummary({ bids, cpp }) {
+  const filled = bids.filter(b => b != null);
+  if (filled.length === 0) return null;
+  const total = filled.reduce((s,b) => s+b, 0);
+  const diff = total - cpp;
+  if (diff === 0) return <span style={{color:'#fbbf24',fontSize:12}}>⚠ Cerrado exacto</span>;
+  if (diff > 0) return <span style={{color:'#f87171',fontSize:12}}>+{diff} que todos quieren</span>;
+  return <span style={{color:'#4ade80',fontSize:12}}>{Math.abs(diff)} que nadie quiere</span>;
+}
+
+// ─── Easter egg toast ─────────────────────────────────────────────────────────
+function Toast({ msg, onDone }) {
+  useEffect(() => { const t = setTimeout(onDone, 4000); return () => clearTimeout(t); }, []);
+  return (
+    <div style={{position:'fixed',top:80,left:'50%',transform:'translateX(-50%)',zIndex:100,background:'rgba(0,0,0,.85)',border:'2px solid #fbbf24',borderRadius:12,padding:'12px 24px',color:'#fbbf24',fontSize:15,fontWeight:'bold',textAlign:'center',maxWidth:320,boxShadow:'0 4px 20px rgba(0,0,0,.5)'}}>
+      {msg}
+    </div>
+  );
+}
+
+// ─── GameTable ────────────────────────────────────────────────────────────────
+function GameTable({ g, players, onBid, onPlay, sel, setSel, error, toast, setToast }) {
   const n = players.length;
   const you = g.yourIndex;
+  const cpp = g.rs?.[g.ri] || 0;
   const positions = POSITIONS[n] || POSITIONS[4];
+  const relPos = pi => (pi - you + n) % n;
+
+  // Timer state
+  const [bidSecs, setBidSecs] = useState(null);
+  const [playSecs, setPlaySecs] = useState(null);
+  const bidTimerRef = useRef(null);
+  const playTimerRef = useRef(null);
+
+  // Bid timer
+  useEffect(() => {
+    if (bidTimerRef.current) clearInterval(bidTimerRef.current);
+    if (g.phase === 'bid' && g.bp === you) {
+      const limit = bidTimeLimit(cpp);
+      setBidSecs(limit);
+      bidTimerRef.current = setInterval(() => {
+        setBidSecs(s => {
+          if (s <= 1) {
+            clearInterval(bidTimerRef.current);
+            onBid(2); // default bid
+            return 0;
+          }
+          return s - 1;
+        });
+      }, 1000);
+    } else {
+      setBidSecs(null);
+    }
+    return () => clearInterval(bidTimerRef.current);
+  }, [g.phase, g.bp, g.ri]);
+
+  // Play timer
+  useEffect(() => {
+    if (playTimerRef.current) clearInterval(playTimerRef.current);
+    if (g.phase === 'play' && g.cp === you && (g.trick||[]).length < n) {
+      const limit = playTimeLimit(cpp);
+      setPlaySecs(limit);
+      playTimerRef.current = setInterval(() => {
+        setPlaySecs(s => {
+          if (s <= 1) {
+            clearInterval(playTimerRef.current);
+            // Auto-play: pick first valid card
+            const h = g.myHand || [];
+            const hasSuit = g.lead ? h.some(c => c.s === g.lead) : false;
+            const valid = hasSuit ? h.filter(c => c.s === g.lead) : h;
+            if (valid.length) onPlay(valid[0].id);
+            return 0;
+          }
+          return s - 1;
+        });
+      }, 1000);
+    } else {
+      setPlaySecs(null);
+    }
+    return () => clearInterval(playTimerRef.current);
+  }, [g.phase, g.cp, (g.trick||[]).length, g.ri]);
+
+  // Easter egg: panchueliando — first card of trick is high and hand is "nadie quiere"
+  const prevTrickLen = useRef(0);
+  useEffect(() => {
+    const trickLen = (g.trick||[]).length;
+    if (trickLen === 1 && prevTrickLen.current === 0 && cpp >= 10 && g.phase === 'play') {
+      const totalBids = (g.bids||[]).reduce((s,b) => b!=null?s+b:s, 0);
+      const nadieQuiere = totalBids < cpp;
+      if (nadieQuiere) {
+        const firstPlay = g.trick[0];
+        const c = firstPlay.c;
+        const isHighTrump = g.trump && c.s === g.trump && RV[c.r] >= 10;
+        const isHigh = HIGH.has(c.r) || isHighTrump;
+        if (isHigh) {
+          const playerName = (players[firstPlay.p]||{}).name;
+          setToast(`${playerName} está panchueliando 🤌`);
+        }
+      }
+    }
+    prevTrickLen.current = trickLen;
+  }, [(g.trick||[]).length]);
+
   const ok = (() => {
     if (!g || g.cp !== you || g.phase !== 'play' || (g.trick||[]).length >= n) return new Set();
     const h = g.myHand || [];
     if (!g.lead||(g.trick||[]).length===0) return new Set(h);
-    const hasSuit = h.some(c=>c.s===g.lead);
-    return new Set(hasSuit ? h.filter(c=>c.s===g.lead) : h);
+    const hasSuit = h.some(c => c.s === g.lead);
+    return new Set(hasSuit ? h.filter(c => c.s === g.lead) : h);
   })();
+
   const hand = sortH(g.myHand || []);
-  const cpp = g.rs?.[g.ri] || 0;
 
-  // Map player index → relative seat position
-  const relPos = (pi) => (pi - you + n) % n;
+  // Easter egg: Orzon on hand 1
+  const isOrzon = players.some(p => p.name.toLowerCase() === 'orzon');
 
-  // Build trick map: playerIndex → card
   const trickMap = {};
   (g.trick||[]).forEach(({p,c}) => { trickMap[p] = c; });
-
-  // Last trick map
-  const lastTrickMap = {};
-  let lastTrickWinner = -1;
-  if (g.lastTrick) {
-    g.lastTrick.cards.forEach(({p,c}) => { lastTrickMap[p] = c; });
-    lastTrickWinner = g.lastTrick.winner;
-  }
 
   const humanPlay = card => {
     if (g.cp !== you || (g.trick||[]).length >= n) return;
@@ -147,85 +230,64 @@ function GameTable({ g, players, onBid, onPlay, sel, setSel, error }) {
     onPlay(card.id);
   };
 
+  const handleBid = bid => {
+    if (isOrzon && cpp === 1 && bid === 2) {
+      setToast('entendiste gabito 😂');
+    }
+    onBid(bid);
+  };
+
   return (
     <div style={{display:'flex',flexDirection:'column',gap:8,width:'100%',maxWidth:700}}>
-      {/* Table */}
-      <div style={{position:'relative',width:'100%',paddingBottom:'62%',borderRadius:24,overflow:'visible'}}>
-        {/* Felt */}
-        <div style={{
-          position:'absolute',inset:0,
-          background:'radial-gradient(ellipse at center, #1a6b3a 60%, #0f4a28 100%)',
-          borderRadius:24,
-          border:'3px solid #0a3018',
-          boxShadow:'0 0 0 6px #0a2010, inset 0 0 60px rgba(0,0,0,.4)',
-        }}/>
 
-        {/* Center oval decoration */}
-        <div style={{
-          position:'absolute',left:'20%',right:'20%',top:'18%',bottom:'18%',
-          borderRadius:'50%',
-          border:'1px solid rgba(255,255,255,.06)',
-          pointerEvents:'none',
-        }}/>
-
-        {/* Trump card center */}
-        {g.tCard && (
-          <div style={{
-            position:'absolute',left:'50%',top:'50%',
-            transform:'translate(-50%,-50%)',
-            display:'flex',flexDirection:'column',alignItems:'center',gap:4,
-            zIndex:2,
-          }}>
-            <div style={{transform:'rotate(15deg)',filter:'drop-shadow(0 3px 8px rgba(0,0,0,.6))'}}>
-              <CardFace c={g.tCard} ok={false} size='md'/>
+      {/* Trump card + bid summary bar */}
+      <div style={{display:'flex',alignItems:'center',gap:10,background:'rgba(0,0,0,.2)',borderRadius:10,padding:'6px 12px',flexWrap:'wrap'}}>
+        {g.tCard ? (
+          <div style={{display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:11,color:'rgba(255,255,255,.4)'}}>Triunfo:</span>
+            <div style={{filter:'drop-shadow(0 2px 5px rgba(0,0,0,.5))'}}>
+              <CardFace c={g.tCard} ok={false} size='sm'/>
             </div>
           </div>
+        ) : (
+          <span style={{fontSize:12,color:'rgba(255,255,255,.35)'}}>Sin triunfo</span>
         )}
-        {!g.tCard && (
-          <div style={{position:'absolute',left:'50%',top:'50%',transform:'translate(-50%,-50%)',fontSize:10,color:'rgba(255,255,255,.18)',zIndex:2,textAlign:'center',lineHeight:1.4}}>
-            sin<br/>triunfo
-          </div>
-        )}
+        <div style={{flex:1,textAlign:'right'}}>
+          <BidSummary bids={g.bids||[]} cpp={cpp}/>
+        </div>
+      </div>
 
-
+      {/* Table */}
+      <div style={{position:'relative',width:'100%',paddingBottom:'62%',borderRadius:24,overflow:'visible'}}>
+        <div style={{position:'absolute',inset:0,background:'radial-gradient(ellipse at center,#1a6b3a 60%,#0f4a28 100%)',borderRadius:24,border:'3px solid #0a3018',boxShadow:'0 0 0 6px #0a2010,inset 0 0 60px rgba(0,0,0,.4)'}}/>
+        <div style={{position:'absolute',left:'20%',right:'20%',top:'18%',bottom:'18%',borderRadius:'50%',border:'1px solid rgba(255,255,255,.06)',pointerEvents:'none'}}/>
 
         {/* Current trick cards */}
         {Object.entries(trickMap).map(([p,c]) => (
-          <TableCard key={'t'+p} c={c} pos={positions[relPos(parseInt(p))]} isWinner={false} isLastTrick={false}/>
+          <TableCard key={'t'+p} c={c} pos={positions[relPos(parseInt(p))]}/>
         ))}
 
         {/* Player seats */}
-        {players.map((pl, pi) => {
+        {players.map((pl,pi) => {
           const rp = relPos(pi);
-          const pos = positions[rp];
           const active = (g.phase==='play'&&g.cp===pi)||(g.phase==='bid'&&g.bp===pi);
-          const bidding = g.phase==='bid'&&g.bp===pi&&pi!==you;
           return (
-            <PlayerSeat key={pi}
-              player={pl} bid={(g.bids||[])[pi]} taken={(g.taken||[])[pi]}
-              score={(g.sc||[])[pi]||0} active={active} bidding={bidding}
-              isYou={pi===you} pos={pos} n={n}
-            />
+            <PlayerSeat key={pi} player={pl} bid={(g.bids||[])[pi]} taken={(g.taken||[])[pi]}
+              score={(g.sc||[])[pi]||0} active={active} bidding={g.phase==='bid'&&g.bp===pi&&pi!==you}
+              isYou={pi===you} pos={positions[rp]}/>
           );
         })}
 
-        {/* Other players card backs — shown at seat edges */}
-        {players.map((pl, pi) => {
+        {/* Other players card backs */}
+        {players.map((pl,pi) => {
           if (pi===you) return null;
           const rp = relPos(pi);
           const pos = positions[rp];
           const hl = (g.handCounts||[])[pi]||0;
           if (!hl) return null;
-          const isH = pos.seat.x > 30 && pos.seat.x < 70; // top or bottom
+          const isH = pos.seat.x > 30 && pos.seat.x < 70;
           return (
-            <div key={'h'+pi} style={{
-              position:'absolute',
-              left:`${pos.seat.x}%`,
-              top:`${pos.seat.y}%`,
-              transform:`translate(-50%,${isH ? (pos.seat.y<30?'60%':'-160%') : '-50%'})`,
-              display:'flex', gap: isH?1:0, flexDirection: isH?'row':'column',
-              zIndex:1, pointerEvents:'none',
-            }}>
+            <div key={'h'+pi} style={{position:'absolute',left:`${pos.seat.x}%`,top:`${pos.seat.y}%`,transform:`translate(-50%,${isH?(pos.seat.y<30?'60%':'-160%'):'-50%'})`,display:'flex',gap:isH?1:0,flexDirection:isH?'row':'column',zIndex:1,pointerEvents:'none'}}>
               {Array.from({length:Math.min(hl,8)},(_,j)=>(
                 <div key={j} style={{marginTop:isH?0:j===0?0:-28,marginLeft:isH?j===0?0:-14:0}}>
                   <CardBack size='xs'/>
@@ -240,17 +302,39 @@ function GameTable({ g, players, onBid, onPlay, sel, setSel, error }) {
       {/* Bid phase */}
       {g.phase==='bid'&&g.bp===you&&(
         <div style={{textAlign:'center'}}>
-          <div style={{color:'#86efac',fontSize:13,marginBottom:6}}>¿Cuántas bazas vas a ganar?</div>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:10,marginBottom:6}}>
+            <span style={{color:'#86efac',fontSize:13}}>¿Cuántas bazas vas a ganar?</span>
+            {bidSecs!=null&&<Countdown seconds={bidSecs} total={bidTimeLimit(cpp)}/>}
+          </div>
           <div style={{display:'flex',gap:5,flexWrap:'wrap',justifyContent:'center'}}>
-            {Array.from({length:cpp+1},(_,bid)=>{
+            {Array.from({length: isOrzon&&cpp===1 ? cpp+3 : cpp+1},(_,bid)=>{
               const filled=(g.bids||[]).filter(b=>b!=null).length;
               const isLast=filled===n-1;
               const taken=(g.bids||[]).reduce((s,b)=>b!=null?s+b:s,0);
               const banned=isLast&&bid===cpp-taken;
-              return <button key={bid} onClick={()=>onBid(bid)} disabled={banned} style={{width:44,height:44,borderRadius:8,border:'none',background:banned?'#374151':'#16a34a',color:banned?'#4b5563':'#fff',fontSize:17,fontWeight:'bold',cursor:banned?'not-allowed':'pointer'}}>{bid}</button>;
+              const isEaster=isOrzon&&cpp===1&&bid===2;
+              return (
+                <button key={bid} onClick={()=>handleBid(bid)} disabled={banned} style={{
+                  width:44,height:44,borderRadius:8,border:isEaster?'2px solid #fbbf24':'none',
+                  background:banned?'#374151':isEaster?'rgba(251,191,36,.2)':'#16a34a',
+                  color:banned?'#4b5563':isEaster?'#fbbf24':'#fff',
+                  fontSize:17,fontWeight:'bold',cursor:banned?'not-allowed':'pointer'
+                }}>{bid}</button>
+              );
             })}
           </div>
           {(g.bids||[]).filter(b=>b!=null).length===n-1&&<div style={{fontSize:10,color:'rgba(255,255,255,.4)',marginTop:5}}>Sos el último en apostar</div>}
+        </div>
+      )}
+      {g.phase==='bid'&&g.bp!==you&&g.bp>=0&&(
+        <div style={{color:'#86efac',fontSize:12,textAlign:'center'}}>{(players[g.bp]||{}).name} está apostando...</div>
+      )}
+
+      {/* Play timer */}
+      {g.phase==='play'&&g.cp===you&&playSecs!=null&&(
+        <div style={{display:'flex',justifyContent:'center',alignItems:'center',gap:8}}>
+          <span style={{fontSize:12,color:'rgba(255,255,255,.5)'}}>Tiempo para jugar:</span>
+          <Countdown seconds={playSecs} total={playTimeLimit(cpp)}/>
         </div>
       )}
 
@@ -342,7 +426,6 @@ function Scoreboard({ history, players, sc, scoring, onClose }) {
   );
 }
 
-// ─── Trick Log ────────────────────────────────────────────────────────────────
 function TrickLog({ trickLog, players, onClose }) {
   const [page,setPage]=useState(trickLog.length-1);
   const trick=trickLog[page];
@@ -380,7 +463,6 @@ function TrickLog({ trickLog, players, onClose }) {
   );
 }
 
-// ─── Chat ─────────────────────────────────────────────────────────────────────
 function Chat({ messages, onSend, playerName }) {
   const [text,setText]=useState('');
   const bottomRef=useRef(null);
@@ -421,6 +503,7 @@ export default function App() {
   const [showBoard,setShowBoard]=useState(false);
   const [showChat,setShowChat]=useState(false);
   const [showTrickLog,setShowTrickLog]=useState(false);
+  const [toast,setToast]=useState(null);
   const [error,setError]=useState('');
   const [unread,setUnread]=useState(0);
   const prevChatLen=useRef(0);
@@ -430,18 +513,12 @@ export default function App() {
   useEffect(()=>{
     const savedCode=localStorage.getItem('basas_room');
     const savedName=localStorage.getItem('basas_name');
-    if(savedCode&&savedName){
-      reconnectRef.current={code:savedCode,name:savedName};
-      setScreen('reconnecting');
-    }
+    if(savedCode&&savedName){reconnectRef.current={code:savedCode,name:savedName};setScreen('reconnecting');}
     const socket=io({reconnectionAttempts:15,reconnectionDelay:1500});
     socketRef.current=socket;
-    socket.on('connect',()=>{
-      if(reconnectRef.current) socket.emit('reconnect_room',reconnectRef.current);
-    });
+    socket.on('connect',()=>{if(reconnectRef.current) socket.emit('reconnect_room',reconnectRef.current);});
     socket.on('game_update',data=>{
-      setG(data); setError('');
-      reconnectRef.current=null;
+      setG(data);setError('');reconnectRef.current=null;
       const chatLen=(data.chat||[]).length;
       if(chatLen>prevChatLen.current&&!showChatRef.current) setUnread(u=>u+(chatLen-prevChatLen.current));
       prevChatLen.current=chatLen;
@@ -457,10 +534,9 @@ export default function App() {
 
   const emit=(ev,data)=>socketRef.current?.emit(ev,data);
   const saveName=n=>{setName(n);localStorage.setItem('basas_name',n);};
-
   useEffect(()=>{if(g?.roomCode) localStorage.setItem('basas_room',g.roomCode);},[g?.roomCode]);
 
-  const handleBid=bid=>{
+  const handleBid=useCallback(bid=>{
     if(!g||g.bp!==g.yourIndex) return;
     const filled=(g.bids||[]).filter(b=>b!=null).length;
     const isLast=filled===(g.n||0)-1;
@@ -468,8 +544,13 @@ export default function App() {
       const taken=(g.bids||[]).reduce((s,b)=>b!=null?s+b:s,0);
       if(bid===(g.rs?.[g.ri]||0)-taken){setError(`⚠️ No podés apostar ${bid} — el total no puede cerrar`);return;}
     }
-    setError(''); emit('place_bid',{roomCode:g.roomCode,bid});
-  };
+    setError('');emit('place_bid',{roomCode:g.roomCode,bid});
+  },[g]);
+
+  const handlePlay=useCallback(cardId=>{
+    if(!g) return;
+    emit('play_card',{roomCode:g.roomCode,cardId});
+  },[g]);
 
   const gs={background:'#0f2418',minHeight:'100vh',padding:'8px',fontFamily:'system-ui,sans-serif',color:'#fff',display:'flex',flexDirection:'column',alignItems:'center',gap:8};
   const cardBox={background:'rgba(0,0,0,.25)',borderRadius:12,padding:'16px 18px',marginBottom:14,width:'100%',maxWidth:460};
@@ -533,10 +614,7 @@ export default function App() {
       <h2 style={{fontSize:24,fontWeight:500,marginBottom:20}}>Unirse a sala</h2>
       <div style={cardBox}>
         <div style={{color:'#86efac',fontSize:13,marginBottom:8,textAlign:'left'}}>Código de sala</div>
-        <input style={{...inputSt,textTransform:'uppercase',letterSpacing:6,fontSize:22,textAlign:'center'}}
-          placeholder="XXXX" maxLength={4} value={joinCode}
-          onChange={e=>setJoinCode(e.target.value.toUpperCase())}
-          onKeyDown={e=>e.key==='Enter'&&(()=>{if(!name.trim()){setError('Ingresá tu nombre');return;}saveName(name.trim());emit('join_room',{code:joinCode.trim().toUpperCase(),name:name.trim()});})()}/>
+        <input style={{...inputSt,textTransform:'uppercase',letterSpacing:6,fontSize:22,textAlign:'center'}} placeholder="XXXX" maxLength={4} value={joinCode} onChange={e=>setJoinCode(e.target.value.toUpperCase())} onKeyDown={e=>e.key==='Enter'&&(()=>{if(!name.trim()){setError('Ingresá tu nombre');return;}saveName(name.trim());emit('join_room',{code:joinCode.trim().toUpperCase(),name:name.trim()});})()}/>
       </div>
       {error&&<div style={{color:'#f87171',fontSize:13,marginBottom:8}}>{error}</div>}
       <div style={{display:'flex',gap:12}}>
@@ -583,11 +661,11 @@ export default function App() {
   if(screen==='game'&&g){
     const players=g.players||[];
     const myName=players[g.yourIndex]?.name||'';
-    const chatMsgs=g.chat||[];
     const trickLog=g.trickLog||[];
-
     return (
       <div style={{...gs,position:'relative'}}>
+        {toast&&<Toast msg={toast} onDone={()=>setToast(null)}/>}
+
         {/* Top bar */}
         <div style={{width:'100%',maxWidth:760,display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:6}}>
           <div style={{display:'flex',alignItems:'center',gap:8,flexWrap:'wrap'}}>
@@ -608,18 +686,14 @@ export default function App() {
 
         {/* Game + chat */}
         <div style={{width:'100%',maxWidth:760,display:'flex',gap:10,alignItems:'flex-start'}}>
-          <GameTable g={g} players={players}
-            onBid={handleBid}
-            onPlay={cardId=>emit('play_card',{roomCode:g.roomCode,cardId})}
-            sel={sel} setSel={setSel} error={error}
-          />
+          <GameTable g={g} players={players} onBid={handleBid} onPlay={handlePlay} sel={sel} setSel={setSel} error={error} toast={toast} setToast={setToast}/>
           {showChat&&(
             <div style={{width:210,minHeight:380,background:'rgba(0,0,0,.3)',border:'1px solid rgba(255,255,255,.12)',borderRadius:12,display:'flex',flexDirection:'column',flexShrink:0}}>
               <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',borderBottom:'1px solid rgba(255,255,255,.1)'}}>
                 <span style={{fontSize:13,fontWeight:500}}>💬 Chat</span>
                 <button onClick={()=>setShowChat(false)} style={{background:'transparent',border:'none',color:'rgba(255,255,255,.5)',cursor:'pointer',fontSize:14}}>✕</button>
               </div>
-              <div style={{flex:1}}><Chat messages={chatMsgs} onSend={text=>emit('chat_message',{roomCode:g.roomCode,text})} playerName={myName}/></div>
+              <div style={{flex:1}}><Chat messages={g.chat||[]} onSend={text=>emit('chat_message',{roomCode:g.roomCode,text})} playerName={myName}/></div>
             </div>
           )}
         </div>
