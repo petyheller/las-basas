@@ -307,7 +307,7 @@ function GameTable({ g, players, onBid, onPlay, sel, setSel, error, toast, setTo
             {bidSecs!=null&&<Countdown seconds={bidSecs} total={bidTimeLimit(cpp)}/>}
           </div>
           <div style={{display:'flex',gap:5,flexWrap:'wrap',justifyContent:'center'}}>
-            {Array.from({length: isOrzon&&cpp===1 ? cpp+3 : cpp+1},(_,bid)=>{
+            {Array.from({length: isOrzon&&cpp===1 ? cpp+2 : cpp+1},(_,bid)=>{
               const filled=(g.bids||[]).filter(b=>b!=null).length;
               const isLast=filled===n-1;
               const taken=(g.bids||[]).reduce((s,b)=>b!=null?s+b:s,0);
