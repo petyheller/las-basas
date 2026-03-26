@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
 const isRed = s => s === '♥' || s === '♦';
+const suitColor = s => ({ '♠':'#1e293b', '♥':'#dc2626', '♦':'#2563eb', '♣':'#16a34a' }[s]||'#111827');
 const RV = {'2':2,'3':3,'4':4,'5':5,'6':6,'7':7,'8':8,'9':9,'10':10,'J':11,'Q':12,'K':13,'A':14};
 const HIGH = new Set(['A','K','Q','J']);
 const sortH = h => {
@@ -15,7 +16,6 @@ const playTimeLimit = cpp => cpp <= 5 ? 20 : 20 + (cpp - 5) * 5;
 
 // ─── Card components ──────────────────────────────────────────────────────────
 function CardFace({ c, sel, ok, onClick, size='md' }) {
-  const r = isRed(c.s);
   const dims = { sm:[34,50,9,6], md:[52,74,10,6], lg:[58,82,11,6], xs:[22,32,8,3] };
   const [W,H,fs,pad] = dims[size]||dims.md;
   return (
@@ -26,8 +26,8 @@ function CardFace({ c, sel, ok, onClick, size='md' }) {
       padding:pad, cursor:ok||sel?'pointer':'default',
       boxShadow:sel?'0 0 0 3px #fbbf24,0 4px 8px rgba(0,0,0,.3)':'0 2px 4px rgba(0,0,0,.25)',
       transform:sel?'translateY(-14px)':ok?'translateY(-5px)':'none',
-      transition:'all .12s', color:r?'#dc2626':'#111827',
-      fontSize:fs, userSelect:'none', opacity:!ok&&!sel?.55:1, flexShrink:0,
+      transition:'all .12s',
+      fontSize:fs, userSelect:'none', opacity:!ok&&!sel?.55:1, flexShrink:0, color:suitColor(c.s),
     }}>
       <div><b style={{display:'block',lineHeight:1.1}}>{c.r}</b><span>{c.s}</span></div>
       {size!=='xs'&&<div style={{textAlign:'right'}}><span>{c.s}</span><b style={{display:'block',lineHeight:1.1}}>{c.r}</b></div>}
@@ -186,20 +186,21 @@ function GameTable({ g, players, onBid, onPlay, sel, setSel, error, toast, setTo
     return () => clearInterval(playTimerRef.current);
   }, [g.phase, g.cp, (g.trick||[]).length, g.ri]);
 
-  // Easter egg: panchueliando — first card of trick is high and hand is "nadie quiere"
+  // Easter egg: panchueliando — only on 1st or 2nd card of the round (round >= 10)
   const prevTrickLen = useRef(0);
   useEffect(() => {
     const trickLen = (g.trick||[]).length;
-    if (trickLen === 1 && prevTrickLen.current === 0 && cpp >= 10 && g.phase === 'play') {
+    const totalPlayedInRound = (g.trickLog||[]).length * n + trickLen;
+    if (trickLen > prevTrickLen.current && totalPlayedInRound <= 2 && cpp >= 10 && g.phase === 'play') {
       const totalBids = (g.bids||[]).reduce((s,b) => b!=null?s+b:s, 0);
       const nadieQuiere = totalBids < cpp;
       if (nadieQuiere) {
-        const firstPlay = g.trick[0];
-        const c = firstPlay.c;
+        const lastPlay = g.trick[g.trick.length - 1];
+        const c = lastPlay.c;
         const isHighTrump = g.trump && c.s === g.trump && RV[c.r] >= 10;
         const isHigh = HIGH.has(c.r) || isHighTrump;
         if (isHigh) {
-          const playerName = (players[firstPlay.p]||{}).name;
+          const playerName = (players[lastPlay.p]||{}).name;
           setToast(`${playerName} está panchueliando 🤌`);
         }
       }
@@ -426,7 +427,7 @@ function Scoreboard({ history, players, sc, scoring, onClose }) {
   );
 }
 
-function TrickLog({ trickLog, players, onClose }) {
+function TrickLog({ trickLog, players, onClose, onlyLast=false }) {
   const [page,setPage]=useState(trickLog.length-1);
   const trick=trickLog[page];
   if(!trick) return null;
@@ -437,11 +438,18 @@ function TrickLog({ trickLog, players, onClose }) {
           <span style={{fontSize:16,fontWeight:500}}>🃏 Historial de bazas</span>
           <button onClick={onClose} style={{background:'transparent',border:'1px solid rgba(255,255,255,.3)',color:'#fff',borderRadius:6,padding:'3px 12px',cursor:'pointer',fontSize:13}}>✕</button>
         </div>
-        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,justifyContent:'center'}}>
-          <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'#fff',borderRadius:6,padding:'4px 12px',cursor:page===0?'not-allowed':'pointer',opacity:page===0?.4:1}}>←</button>
-          <span style={{color:'#86efac',fontSize:13}}>Baza {page+1} de {trickLog.length}</span>
-          <button onClick={()=>setPage(p=>Math.min(trickLog.length-1,p+1))} disabled={page===trickLog.length-1} style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'#fff',borderRadius:6,padding:'4px 12px',cursor:page===trickLog.length-1?'not-allowed':'pointer',opacity:page===trickLog.length-1?.4:1}}>→</button>
-        </div>
+        {!onlyLast && (
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:16,justifyContent:'center'}}>
+            <button onClick={()=>setPage(p=>Math.max(0,p-1))} disabled={page===0} style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'#fff',borderRadius:6,padding:'4px 12px',cursor:page===0?'not-allowed':'pointer',opacity:page===0?.4:1}}>←</button>
+            <span style={{color:'#86efac',fontSize:13}}>Baza {page+1} de {trickLog.length}</span>
+            <button onClick={()=>setPage(p=>Math.min(trickLog.length-1,p+1))} disabled={page===trickLog.length-1} style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'#fff',borderRadius:6,padding:'4px 12px',cursor:page===trickLog.length-1?'not-allowed':'pointer',opacity:page===trickLog.length-1?.4:1}}>→</button>
+          </div>
+        )}
+        {onlyLast && (
+          <div style={{textAlign:'center',marginBottom:16}}>
+            <span style={{color:'#86efac',fontSize:13}}>Última baza jugada</span>
+          </div>
+        )}
         <div style={{display:'flex',flexDirection:'column',gap:8,marginBottom:14}}>
           {trick.cards.map(({p,c})=>{
             const isW=p===trick.winner;
@@ -498,6 +506,7 @@ export default function App() {
   const [joinCode,setJoinCode]=useState('');
   const [setupN,setSetupN]=useState(4);
   const [setupScoring,setSetupScoring]=useState('pablo');
+  const [setupStakes,setSetupStakes]=useState({type:'none',description:''});
   const [g,setG]=useState(null);
   const [sel,setSel]=useState(null);
   const [showBoard,setShowBoard]=useState(false);
@@ -516,7 +525,19 @@ export default function App() {
     if(savedCode&&savedName){reconnectRef.current={code:savedCode,name:savedName};setScreen('reconnecting');}
     const socket=io({reconnectionAttempts:15,reconnectionDelay:1500});
     socketRef.current=socket;
-    socket.on('connect',()=>{if(reconnectRef.current) socket.emit('reconnect_room',reconnectRef.current);});
+    socket.on('connect',()=>{
+      if(reconnectRef.current) {
+        socket.emit('reconnect_room',reconnectRef.current);
+      }
+    });
+    socket.on('reconnect',()=>{
+      // Socket.io auto-reconnect after drop — re-sync with server
+      const savedCode=localStorage.getItem('basas_room');
+      const savedName=localStorage.getItem('basas_name');
+      if(savedCode&&savedName) {
+        socket.emit('reconnect_room',{code:savedCode,name:savedName});
+      }
+    });
     socket.on('game_update',data=>{
       setG(data);setError('');reconnectRef.current=null;
       const chatLen=(data.chat||[]).length;
@@ -551,6 +572,14 @@ export default function App() {
     if(!g) return;
     emit('play_card',{roomCode:g.roomCode,cardId});
   },[g]);
+
+  const leaveRoom = () => {
+    if (!g?.roomCode) return;
+    emit('leave_room', { roomCode: g.roomCode });
+    localStorage.removeItem('basas_room');
+    setG(null);
+    setScreen('home');
+  };
 
   const gs={background:'#0f2418',minHeight:'100vh',padding:'8px',fontFamily:'system-ui,sans-serif',color:'#fff',display:'flex',flexDirection:'column',alignItems:'center',gap:8};
   const cardBox={background:'rgba(0,0,0,.25)',borderRadius:12,padding:'16px 18px',marginBottom:14,width:'100%',maxWidth:460};
@@ -601,10 +630,24 @@ export default function App() {
           {optBtn(setupScoring==='fer',()=>setSetupScoring('fer'),<span>A lo Fer<br/><span style={{fontSize:11,fontWeight:'normal',color:'#86efac'}}>Acertar: 10×ap (0→5)</span></span>)}
         </div>
       </div>
+      <div style={cardBox}>
+        <div style={{color:'#86efac',fontSize:13,marginBottom:8,textAlign:'left'}}>¿Se juega por algo?</div>
+        <div style={{display:'flex',gap:8,marginBottom:10,flexWrap:'wrap'}}>
+          {[{v:'none',label:'Sin apuesta'},{v:'prenda',label:'🎭 Prenda al perdedor'},{v:'premio',label:'🏆 Premio al ganador'}].map(({v,label})=>optBtn(setupStakes.type===v,()=>setSetupStakes({type:v,description:''}),label))}
+        </div>
+        {setupStakes.type!=='none'&&(
+          <input
+            style={{...inputSt,fontSize:13,marginTop:4}}
+            placeholder={setupStakes.type==='prenda'?'Ej: el que pierde paga las pizzas...':'Ej: el ganador elige la próxima actividad...'}
+            value={setupStakes.description}
+            onChange={e=>setSetupStakes(s=>({...s,description:e.target.value.slice(0,120)}))}
+          />
+        )}
+      </div>
       {error&&<div style={{color:'#f87171',fontSize:13,marginBottom:8}}>{error}</div>}
       <div style={{display:'flex',gap:12}}>
         <button onClick={()=>setScreen('home')} style={btnS}>← Volver</button>
-        <button onClick={()=>{if(!name.trim()){setError('Ingresá tu nombre');return;}saveName(name.trim());emit('create_room',{name:name.trim(),maxPlayers:setupN,scoring:setupScoring});}} style={btnP}>Crear sala</button>
+        <button onClick={()=>{if(!name.trim()){setError('Ingresá tu nombre');return;}saveName(name.trim());emit('create_room',{name:name.trim(),maxPlayers:setupN,scoring:setupScoring,stakes:setupStakes});}} style={btnP}>Crear sala</button>
       </div>
     </div>
   );
@@ -633,8 +676,60 @@ export default function App() {
         <span style={{background:'rgba(0,0,0,.3)',border:'2px solid #4ade80',borderRadius:8,padding:'6px 18px',fontSize:26,fontWeight:'bold',letterSpacing:6}}>{g.roomCode}</span>
         <button onClick={()=>navigator.clipboard?.writeText(g.roomCode)} style={{...btnS,padding:'6px 12px',fontSize:12}}>Copiar</button>
       </div>
+      {/* Stakes panel */}
+      {g.stakes&&g.stakes.type!=='none'&&(
+        <div style={{...cardBox,textAlign:'left',borderColor:g.stakes.type==='prenda'?'rgba(168,85,247,.4)':'rgba(251,191,36,.4)',border:'1.5px solid'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+            <span style={{fontSize:13,color:g.stakes.type==='prenda'?'#c084fc':'#fbbf24',fontWeight:'bold'}}>
+              {g.stakes.type==='prenda'?'🎭 Prenda al perdedor':'🏆 Premio al ganador'}
+            </span>
+            {g.isHost&&(
+              <button onClick={()=>emit('update_stakes',{roomCode:g.roomCode,stakes:{type:'none',description:''}})} style={{background:'transparent',border:'none',color:'rgba(255,255,255,.4)',cursor:'pointer',fontSize:12}}>✕ Quitar</button>
+            )}
+          </div>
+          {g.stakes.description&&<p style={{fontSize:12,color:'rgba(255,255,255,.7)',margin:'0 0 8px',fontStyle:'italic'}}>"{g.stakes.description}"</p>}
+          {/* Host can edit description */}
+          {g.isHost&&(
+            <input style={{...inputSt,fontSize:12,marginBottom:8}}
+              placeholder="Descripción (opcional)"
+              value={g.stakes.description||''}
+              onChange={e=>emit('update_stakes',{roomCode:g.roomCode,stakes:{...g.stakes,description:e.target.value.slice(0,120)}})}
+            />
+          )}
+          {/* Confirmations */}
+          <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:4}}>Confirmaciones:</div>
+          <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+            {(g.players||[]).filter(p=>!p.isBot).map((p,i)=>{
+              const confirmed=(g.confirmations||{})[p.name];
+              const isMe=p.name===(g.players||[])[g.yourIndex]?.name;
+              return (
+                <span key={i} style={{fontSize:11,padding:'3px 10px',borderRadius:20,background:confirmed?'rgba(74,222,128,.2)':'rgba(255,255,255,.06)',border:`1px solid ${confirmed?'#4ade80':'rgba(255,255,255,.2)'}`,color:confirmed?'#4ade80':'rgba(255,255,255,.5)'}}>
+                  {confirmed?'✓ ':''}{p.name}
+                </span>
+              );
+            })}
+          </div>
+          {/* Confirm button for non-confirmed players */}
+          {!(g.confirmations||{})[(g.players||[])[g.yourIndex]?.name]&&(
+            <button onClick={()=>emit('confirm_stakes',{roomCode:g.roomCode})} style={{marginTop:10,background:'#16a34a',color:'#fff',border:'none',borderRadius:8,padding:'8px 20px',fontSize:13,cursor:'pointer',fontWeight:'bold',width:'100%'}}>
+              ✓ Confirmo la apuesta
+            </button>
+          )}
+        </div>
+      )}
+      {/* Host can add stakes if none */}
+      {g.isHost&&(!g.stakes||g.stakes.type==='none')&&(
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',justifyContent:'center',marginBottom:8}}>
+          <button onClick={()=>emit('update_stakes',{roomCode:g.roomCode,stakes:{type:'prenda',description:''}})} style={{...btnS,fontSize:12,padding:'8px 14px'}}>🎭 Agregar prenda</button>
+          <button onClick={()=>emit('update_stakes',{roomCode:g.roomCode,stakes:{type:'premio',description:''}})} style={{...btnS,fontSize:12,padding:'8px 14px'}}>🏆 Agregar premio</button>
+        </div>
+      )}
+
       <div style={{...cardBox,textAlign:'left'}}>
-        <div style={{color:'#86efac',fontSize:13,marginBottom:10}}>Jugadores ({(g.players||[]).length}/{g.maxPlayers})</div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <div style={{color:'#86efac',fontSize:13}}>Jugadores ({(g.players||[]).length}/{g.maxPlayers})</div>
+          <button onClick={leaveRoom} style={{background:'rgba(248,113,113,.15)',border:'1px solid #f87171',color:'#f87171',borderRadius:6,padding:'3px 10px',cursor:'pointer',fontSize:12}}>Salir</button>
+        </div>
         {(g.players||[]).map((p,i)=>(
           <div key={i} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 0',borderBottom:'1px solid rgba(255,255,255,.08)'}}>
             <div style={{width:8,height:8,borderRadius:'50%',background:p.connected||p.isBot?'#4ade80':'#6b7280'}}/>
@@ -674,10 +769,16 @@ export default function App() {
               {g.scoring==='fer'?'A lo Fer':'A lo Pablo'}
             </span>
             <span style={{color:'#86efac',fontSize:12}}>Ronda {(g.ri||0)+1}/{g.rs?.length||0} — {g.rs?.[g.ri]||0} carta{g.rs?.[g.ri]!==1?'s':''}</span>
+            {g.stakes&&g.stakes.type!=='none'&&(
+              <span title={g.stakes.description||''} style={{fontSize:11,background:g.stakes.type==='prenda'?'rgba(168,85,247,.2)':'rgba(251,191,36,.2)',border:`1px solid ${g.stakes.type==='prenda'?'#c084fc':'#fbbf24'}`,borderRadius:20,padding:'2px 8px',color:g.stakes.type==='prenda'?'#c084fc':'#fbbf24',cursor:'default'}}>
+                {g.stakes.type==='prenda'?'🎭':'🏆'} {g.stakes.description?`"${g.stakes.description.slice(0,20)}${g.stakes.description.length>20?'...':''}"`:g.stakes.type==='prenda'?'Prenda':'Premio'}
+              </span>
+            )}
           </div>
           <div style={{display:'flex',gap:6}}>
             <button onClick={()=>setShowBoard(true)} style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'#fff',borderRadius:8,padding:'5px 11px',cursor:'pointer',fontSize:12}}>📋</button>
             {trickLog.length>0&&<button onClick={()=>setShowTrickLog(true)} style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.2)',color:'#fff',borderRadius:8,padding:'5px 11px',cursor:'pointer',fontSize:12}}>🃏</button>}
+            <button onClick={leaveRoom} style={{background:'rgba(248,113,113,.1)',border:'1px solid rgba(248,113,113,.4)',color:'#f87171',borderRadius:8,padding:'5px 10px',cursor:'pointer',fontSize:12}}>✕ Salir</button>
             <button onClick={()=>{setShowChat(true);setUnread(0);}} style={{background:'rgba(255,255,255,.1)',border:`1px solid ${unread>0?'#fbbf24':'rgba(255,255,255,.2)'}`,color:unread>0?'#fbbf24':'#fff',borderRadius:8,padding:'5px 11px',cursor:'pointer',fontSize:12}}>
               💬{unread>0&&<span style={{marginLeft:3,background:'#f59e0b',color:'#000',borderRadius:10,padding:'0 4px',fontSize:10,fontWeight:'bold'}}>{unread}</span>}
             </button>
@@ -763,7 +864,7 @@ export default function App() {
         )}
 
         {showBoard&&<Scoreboard history={g.history||[]} players={players} sc={g.sc||[]} scoring={g.scoring} onClose={()=>setShowBoard(false)}/>}
-        {showTrickLog&&trickLog.length>0&&<TrickLog trickLog={trickLog} players={players} onClose={()=>setShowTrickLog(false)}/>}
+        {showTrickLog&&trickLog.length>0&&<TrickLog trickLog={trickLog} players={players} onClose={()=>setShowTrickLog(false)} onlyLast={g.phase==='play'}/>}
       </div>
     );
   }
