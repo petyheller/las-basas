@@ -133,6 +133,8 @@ function broadcastRoom(roomCode) {
       yourIndex: idx,
       isHost: player.socketId === room.host,
       chat: room.chat || [],
+      stakes: room.stakes || { type: 'none', description: '' },
+      confirmations: room.confirmations || {},
     };
     if (g) {
       payload.ri = g.ri; payload.rs = g.rs; payload.sc = g.sc;
@@ -261,11 +263,13 @@ function handleNextRound(roomCode) {
 
 io.on('connection', (socket) => {
 
-  socket.on('create_room', ({ name, maxPlayers, scoring }) => {
+  socket.on('create_room', ({ name, maxPlayers, scoring, stakes }) => {
     const code = genCode();
     const room = {
       code, phase: 'lobby', host: socket.id,
       maxPlayers: maxPlayers || 4, scoring: scoring || 'pablo',
+      stakes: stakes || { type: 'none', description: '' },
+      confirmations: {},
       gameState: null, chat: [],
       players: [{ id: socket.id, socketId: socket.id, name: name || 'Jugador 1', isBot: false }],
     };
@@ -328,6 +332,24 @@ io.on('connection', (socket) => {
     broadcastRoom(roomCode);
   });
 
+  socket.on('update_stakes', ({ roomCode, stakes }) => {
+    const room = rooms.get(roomCode);
+    if (!room || room.phase !== 'lobby' || room.host !== socket.id) return;
+    room.stakes = stakes;
+    room.confirmations = {}; // reset confirmations on change
+    broadcastRoom(roomCode);
+  });
+
+  socket.on('confirm_stakes', ({ roomCode }) => {
+    const room = rooms.get(roomCode);
+    if (!room || room.phase !== 'lobby') return;
+    const player = room.players.find(p => p.socketId === socket.id);
+    if (!player) return;
+    if (!room.confirmations) room.confirmations = {};
+    room.confirmations[player.name] = true;
+    broadcastRoom(roomCode);
+  });
+
   socket.on('start_game', ({ roomCode }) => {
     const room = rooms.get(roomCode);
     if (!room || room.phase !== 'lobby' || room.host !== socket.id) return;
@@ -365,6 +387,37 @@ io.on('connection', (socket) => {
     room.chat.push(msg);
     if (room.chat.length > 100) room.chat.shift();
     broadcastRoom(roomCode);
+  });
+
+  socket.on('leave_room', ({ roomCode }) => {
+    const room = rooms.get(roomCode); if (!room) return;
+    const idx = room.players.findIndex(p => p.socketId === socket.id);
+    if (idx < 0) return;
+    const player = room.players[idx];
+    if (room.phase === 'lobby') {
+      // Remove from lobby entirely
+      room.players.splice(idx, 1);
+      // Transfer host if needed
+      if (room.host === socket.id && room.players.length > 0) {
+        const newHost = room.players.find(p => p.socketId && !p.isBot);
+        if (newHost) room.host = newHost.socketId;
+      }
+      if (room.players.filter(p => !p.isBot).length === 0) {
+        rooms.delete(roomCode);
+      } else {
+        broadcastRoom(roomCode);
+      }
+    } else {
+      // In game: just mark disconnected (can't remove mid-game)
+      player.socketId = null;
+      if (room.host === socket.id) {
+        const newHost = room.players.find(p => p.socketId && !p.isBot);
+        if (newHost) room.host = newHost.socketId;
+      }
+      broadcastRoom(roomCode);
+    }
+    socket.leave(roomCode);
+    socket.roomCode = null;
   });
 
   socket.on('disconnect', () => {
